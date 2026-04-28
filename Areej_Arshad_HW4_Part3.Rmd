@@ -1,0 +1,406 @@
+---
+title: "STAT 747 - Homework 4"
+subtitle: "Exercise 3: Regularization & Interpretability"
+author: "Areej Arshad"
+date: "2025-12-06"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(caret)
+library(Matrix)
+library(glmnet)
+library(elasticnet)
+library(glmnet)
+library(ncvreg)
+library(grpreg)
+library(rstanarm)
+library(BoomSpikeSlab)
+library(knockoff)
+```
+
+## Import Data
+
+```{r}
+data.3 <- read.csv("proteomics_cancer.csv")
+dim(data.3)
+
+# Save data as matrices
+X <- as.matrix(data.3[,-1])
+y <-  as.numeric(data.3[,1])
+```
+
+The proteomics dataset is a high-dimensional, low-sample-size structure with 200 gene features measured across only 50 samples ($n<<p$).
+
+## 1. Dimensionality Management
+
+### a. Rank deficiency and condition number analysis
+
+For the given data, $n<<p$. Consequently, only 50 columns can be linearly independent (at most) and the input space matrix is always rank deficient.
+
+```{r}
+rankMatrix(X)[1]
+```
+
+```{r}
+# Scaled feature set
+X_scaled <- scale(X)
+
+# Singular Value Decomposition
+svd_X <- svd(X_scaled)
+cond_svd <- max(svd_X$d) / min(svd_X$d)
+
+cat("SVD-based condition number:", cond_svd, "\n")
+```
+
+The SVD-based condition number indicates extreme numerical ill-conditioning, implying that the smallest singular values are effectively zero. This confirms severe multicollinearity and rank deficiency, making the design (and Gram) matrix nearly singular. Consequently, unregularized models such as OLS are unstable, and only regularized or dimension-reduction methods are statistically appropriate for this data.
+
+### b. Screening methods (SIS)
+
+Train-test split to prevent data leakage in the screening and dimensionality reduction process.
+
+```{r}
+set.seed(747)
+idx <- createDataPartition(y, p = 0.8, list = FALSE)
+
+X_train <- X[idx, ]
+X_test  <- X[-idx, ]
+
+y_train <- y[idx]
+y_test  <- y[-idx]
+```
+
+Sure Independence Screening (SIS) reduces the dimensionality of sparse feature spaces by ranking predictors based on their marginal association with the response.
+
+```{r}
+# Compute marginal correlations
+sis_scores <- abs(cor(X_train, y_train, use = "pairwise.complete.obs"))
+hist(sis_scores[,1], main = "Histogram of SIS scores", xlab = "Score")
+```
+
+Rather than the theoretical SIS cutoff of $k = \left[\frac{n}{log(n)}\right]$ variables, a data-driven threshold of 0.2 is chosen based on the empirical distribution of SIS scores.
+
+```{r}
+# Set threshold
+threshold <- 0.20
+
+# Get indices of features above threshold
+sis_index <- which(sis_scores > threshold)
+
+# Subset feature matrix
+X_sis <- X_train[, sis_index, drop = FALSE]
+
+# Summary
+cat("Original p:", ncol(X), "\n")
+cat("After SIS (score > 0.20) p:", ncol(X_sis), "\n")
+```
+
+Applying a data-driven SIS threshold of 0.20 reduced the feature space from 200 to 87 genes for subsequent dimensionality reduction and regularized modeling.
+
+### c. Dimensionality reduction
+
+The number of sparse principal components was selected using cross-validation of a ridge regression model to optimize out-of-sample predictive performance. This approach provides a data-driven choice of latent dimensionality while controlling for overfitting.
+
+```{r}
+set.seed(747)
+
+K_vals <- c(2, 3, 5, 7, 10, 15, 20)
+cv_error <- sapply(K_vals, function(K) {
+  spca_tmp <- spca(X_sis, K = K, type = "predictor",
+                   sparse = "penalty", para = rep(10, K))
+  Z <- X_sis %*% spca_tmp$loadings
+  cv_fit <- cv.glmnet(Z, y_train, alpha = 0)
+  min(cv_fit$cvm)})
+
+# CV results
+K_results <- data.frame(K = K_vals, CV_Error = cv_error)
+K_results
+```
+
+K = 15 is selected as the optimal number of sparse components, as it achieves the lowest prediction error.
+
+```{r}
+# Scale train and test data
+mu  <- colMeans(X_train)
+sdv <- apply(X_train, 2, sd)
+X_train_sc <- scale(X_train, center = mu, scale = sdv)
+X_test_sc  <- scale(X_test,  center = mu, scale = sdv)
+
+# Fit Sparse-PCA on train data
+set.seed(747)
+spca_final <- spca(X_train_sc, K = 15, type = "predictor",
+                   sparse = "penalty", para = rep(10, 15))
+
+# Build Sparse-PCA training dataset
+Z_train <- X_train_sc %*% spca_final$loadings
+dim(Z_train)
+
+# Build Sparse-PCA test dataset
+Z_test <- X_test_sc %*% spca_final$loadings
+dim(Z_test)
+```
+
+## 2. Regularization Methods
+
+### a. Ridge, Lasso, Elastic Net, Adaptive Lasso, SCAD
+
+**i. Ridge Regression**
+
+Ridge Regression applies an L2 penalty that shrinks all coefficients toward zero without setting any exactly to zero. It reduces variance and stabilizes estimation in the presence of multicollinearity but does not perform variable selection.
+
+```{r}
+cv_ridge <- cv.glmnet(Z_train, y_train, alpha = 0)
+
+pred_ridge <- as.numeric(predict(cv_ridge, Z_test, s = "lambda.min"))
+mse_ridge <- mean((y_test - pred_ridge)^2)
+mse_ridge
+```
+
+**ii. LASSO**
+
+The Lasso method applies an L1 penalty that shrinks some coefficients exactly to zero, performing automatic variable selection. It is effective when the true underlying model is sparse.
+
+```{r}
+cv_lasso <- cv.glmnet(Z_train, y_train, alpha = 1)
+
+pred_lasso <- as.numeric(predict(cv_lasso, Z_test, s = "lambda.min"))
+mse_lasso <- mean((y_test - pred_lasso)^2)
+mse_lasso
+```
+
+**iii. Elastic Net**
+
+Elastic Net combines L1 (lasso) and L2 (ridge) penalties to achieve both variable selection and grouped shrinkage. It is especially useful when predictors are highly correlated.
+
+```{r}
+cv_enet <- cv.glmnet(Z_train, y_train, alpha = 0.5)
+
+pred_enet <- as.numeric(predict(cv_enet, Z_test, s = "lambda.min"))
+mse_enet <- mean((y_test - pred_enet)^2)
+mse_enet
+```
+
+**iv. Adaptive LASSO**
+
+Adaptive Lasso is a weighted version of lasso that penalizes important predictors less and weak predictors more. This improves variable selection consistency and often yields better predictive performance than standard lasso.
+
+```{r}
+# Initial Ridge
+cv_ridge_init <- cv.glmnet(Z_train, y_train, alpha = 0)
+beta_init <- as.numeric(coef(cv_ridge_init, s = "lambda.min")[-1])
+
+# Adaptive LASSO with weights
+weights <- 1 / (abs(beta_init) + 1e-6)
+cv_adapt_lasso <- cv.glmnet(Z_train, y_train, alpha = 1,
+                            penalty.factor = weights)
+
+pred_adapt_lasso <- as.numeric(predict(cv_adapt_lasso, Z_test, s = "lambda.min"))
+mse_adapt_lasso <- mean((y_test - pred_adapt_lasso)^2)
+mse_adapt_lasso
+```
+
+**v. SCAD**
+
+This is a nonconvex penalty that strongly shrinks small coefficients while minimizing bias for large coefficients. It aims to improve variable selection accuracy while reducing overshrinkage of strong signals.
+
+```{r}
+cv_scad <- cv.ncvreg(Z_train, y_train, penalty = "SCAD")
+
+pred_scad <- as.numeric(predict(cv_scad, Z_test, lambda = cv_scad$lambda.min))
+mse_scad <- mean((y_test - pred_scad)^2)
+mse_scad
+```
+
+### b. Group Lasso with pathway information
+
+Group Lasso extends lasso by selecting or discarding entire predefined groups of variables together. It enforces structured sparsity when predictors naturally belong to biological pathways or functional groups. For the given data, since true pathway annotation was not available, predictors were assigned to synthetic groups for methodological demonstration of group lasso behavior rather than a biological interpretation.
+
+```{r}
+# Create 10 synthetic pathways
+set.seed(747)
+group <- rep(1:10, length.out = ncol(X_train_sc))
+
+# Fit group lasso
+cv_group <- cv.grpreg(X_train_sc, y_train,
+                      group = group, penalty = "grLasso")
+
+# Predict on test set
+pred_group <- as.numeric(predict(cv_group, X_test_sc, 
+                                 lambda = cv_group$lambda.min))
+mse_group <- mean((y_test - pred_group)^2)
+mse_group
+```
+
+### c. Bayesian approaches
+
+**i. Horseshoe Regression**
+
+The Horseshoe method is a Bayesian global-local shrinkage prior that strongly shrinks noise coefficients while leaving large signals nearly unshrunk. It is well-suited for sparse, high-dimensional problems with small sample sizes.
+
+```{r}
+colnames(Z_train) <- paste0("PC", 1:ncol(Z_train))
+colnames(Z_test)  <- paste0("PC", 1:ncol(Z_test))
+
+set.seed(747)
+
+# Fit model
+hs_fit <- stan_glm(y_train ~ ., data = data.frame(y_train = y_train, Z_train),
+  prior = hs(df = 3), chains = 4, iter = 4000, adapt_delta = 0.99)
+
+# Posterior mean coefficients (excluding intercept)
+beta_hs <- colMeans(as.matrix(hs_fit))[ -1 ] 
+
+# Test set predictions
+pred_hs <- posterior_predict(hs_fit, newdata = data.frame(Z_test))
+pred_hs_mean <- colMeans(pred_hs)
+mse_hs <- mean((y_test - pred_hs_mean)^2)
+mse_hs
+```
+
+**ii. Spike and Slab Regression**
+
+This method uses a two-component prior that explicitly models each coefficient as either exactly zero (spike) or freely estimated (slab). It performs direct Bayesian variable selection but can be unstable in very small samples.
+
+```{r message=FALSE, warning=FALSE}
+set.seed(747)
+
+# Fit model
+ss_fit <- lm.spike(y_train ~ ., niter = 5000, 
+                   data = data.frame(y_train = y_train, Z_train))
+
+# Test set prediction
+pred_ss <- predict(ss_fit, newdata = data.frame(Z_test), burn = 1000)
+mse_ss <- mean((y_test - pred_ss)^2)
+mse_ss
+```
+
+**iii. Performance Comparison**
+
+```{r}
+test_results <- data.frame(Model = c("Ridge", "Lasso", "Elastic Net", 
+                                     "Adaptive Lasso", "SCAD", "Group Lasso",
+                                     "Horseshoe", "Spike and Slab"),
+                           Test_MSE = c(mse_ridge, mse_lasso, mse_enet,
+                                        mse_adapt_lasso, mse_scad, mse_group,
+                                        mse_hs, mse_ss))
+test_results
+```
+
+At K = 15, the Horseshoe model had the lowest test error, with lasso and ridge performing similarly well, showing that the predictive signal is spread across several components and benefits from mild shrinkage rather than strict feature removal. In comparison, adaptive lasso and SCAD performed worse, suggesting that very aggressive variable selection is not well suited when signal is more evenly distributed. Group lasso performed poorly because the imposed group structure does not match the latent components, and spike-and-slab was unstable due to the small sample size.
+
+## 3. Interpretability & Selection
+
+### a. Stability selection for robust signatures
+
+Stability selection was evaluated using both lasso and adaptive lasso, yielding consistent selection patterns for the most stable latent components.
+
+```{r}
+# LASSO
+B <- 100   
+p <- ncol(Z_train)
+select_mat <- matrix(0, nrow = B, ncol = p)
+
+set.seed(747)
+for (b in 1:B) {
+  idx <- sample(1:nrow(Z_train), floor(0.8 * nrow(Z_train)), replace = FALSE)
+  Z_sub <- Z_train[idx, ]
+  y_sub <- y_train[idx]
+  cv_fit <- cv.glmnet(Z_sub, y_sub, alpha = 1)
+  beta <- as.numeric(coef(cv_fit, s = "lambda.min")[-1])
+  select_mat[b, ] <- as.numeric(beta != 0)}
+
+# Selection probability for each PC
+select_prob <- colMeans(select_mat)
+stability_results <- data.frame(PC = colnames(Z_train),
+                                Selection_Prob = select_prob)
+
+# Adaptive LASSO
+B <- 100              
+p <- ncol(Z_train)           
+select_mat_adapt <- matrix(0, nrow = B, ncol = p)
+
+set.seed(747)
+for (b in 1:B) {
+  idx <- sample(1:nrow(Z_train), floor(0.8 * nrow(Z_train)), replace = FALSE)
+  Z_sub <- Z_train[idx, ]
+  y_sub <- y_train[idx]
+
+  cv_ridge <- cv.glmnet(Z_sub, y_sub, alpha = 0)
+  beta_init <- as.numeric(coef(cv_ridge, s = "lambda.min")[-1])
+
+  weights <- 1 / (abs(beta_init) + 1e-6)
+  cv_adapt <- cv.glmnet(Z_sub, y_sub, alpha = 1, penalty.factor = weights)
+  beta_adapt <- as.numeric(coef(cv_adapt, s = "lambda.min")[-1])
+  
+  select_mat_adapt[b, ] <- as.numeric(beta_adapt != 0)}
+
+# Selection probability for each PC
+select_prob_adapt <- colMeans(select_mat_adapt)
+stability_adaptive <- data.frame(PC = colnames(Z_train),
+                                 Selection_Prob = select_prob_adapt)
+```
+
+```{r}
+# Comparison Table
+stability_compare <- data.frame(PC = colnames(Z_train),
+                                Lasso = stability_results$Selection_Prob,
+                                AdaptiveLasso = stability_adaptive$Selection_Prob)
+stability_compare
+```
+
+Stability selection identified eight highly reproducible sparse PCs (PC2, PC3, PC5, PC6, PC8, PC10, PC11, PC13) that were consistently selected by both lasso and adaptive lasso. The remaining components showed method sensitivity and were interpreted as weaker or unstable signals.
+
+### b. Knockoff filters for controlled selection
+
+Knockoff filtering at the gene level was numerically infeasible due to rank deficiency of the design matrix; therefore, FDR-controlled selection was performed in the sparse PCA latent space instead.
+
+```{r}
+# Create knockoffs for SPCA scores
+Zk <- create.second_order(Z_train)
+
+# Lasso knockoff statistics on latent space
+W <- stat.glmnet_lambdasmax(Z_train, Zk, y_train)
+
+# FDR-controlled selection
+thresh <- knockoff.threshold(W, fdr = 0.1)
+
+selected_knock <- which(W >= thresh)
+selected_knock
+```
+
+All eight stability-selected PCs (PC2, PC3, PC5, PC6, PC8, PC10, PC11, PC13) were also confirmed by knockoffs. This indicates that these eight components form a highly robust latent signature supported by both resampling-based reproducibility and formal FDR-controlled inference.
+
+### c. Pathway enrichment analysis
+
+Since the gene identifiers were anonymized (Gene1 - Gene200), the genes could not be mapped to known biological pathways, making pathway enrichment analysis infeasible.
+
+### d. Reproducibility across methods
+
+```{r}
+active_lasso  <- which(coef(cv_lasso, s = "lambda.min")[-1] != 0)
+active_enet <- which(coef(cv_enet, s = "lambda.min")[-1] != 0)
+active_adapt <- which(coef(cv_adapt_lasso, s = "lambda.min")[-1] != 0)
+active_scad <- which(coef(cv_scad, lambda = cv_scad$lambda.min)[-1] != 0)
+active_hs <- which(abs(beta_hs) > 1e-3)
+incl_prob <- summary(ss_fit)$coefficients[, "inc.prob"]
+active_ss <- which(incl_prob > 0.5)
+
+
+common_all <- Reduce(intersect, list(active_lasso, active_enet, active_adapt,
+                                     active_scad, active_hs, active_ss))
+common_all
+
+
+agreement <- data.frame(PC = colnames(Z_train),
+                        Lasso = colnames(Z_train) %in% colnames(Z_train)[active_lasso],
+                        ElasticNet = colnames(Z_train) %in% colnames(Z_train)[active_enet],
+                        AdaptiveLasso = colnames(Z_train) %in% colnames(Z_train)[active_adapt],
+                        SCAD = colnames(Z_train) %in% colnames(Z_train)[active_scad],
+                        Horseshoe = colnames(Z_train) %in% colnames(Z_train)[active_hs],
+                        SpikeSlab = colnames(Z_train) %in% colnames(Z_train)[active_ss])
+agreement
+```
+
+Reproducibility across methods identified a core set of components (PC2, PC3, PC5, PC6, PC8, PC10, PC11, PC13, PC14) that were consistently selected across multiple regularized and Bayesian models. This core closely matches the stability selection results and knockoff filtering at a 10% false discovery rate (excluding PC14). Together, these findings indicate strong agreement between reproducibility, resampling-based stability, and FDR-controlled inference, while the remaining PCs show weaker, method-dependent behavior.

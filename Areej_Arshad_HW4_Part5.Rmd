@@ -1,0 +1,33 @@
+---
+title: "STAT747 - Homework 4"
+subtitle: "Exercise 5: Synthesis and Reflection"
+author: "Areej Arshad"
+date: "2025-12-08"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Part A: Written Reflection
+
+### 1. Discuss how the Nine Wheels framework structured your approach across Exercises 1-3 
+
+The Nine Wheels framework provided a systematic structure that guided my approach across all three exercises, from problem formulation to deployment considerations. It ensured that each project was developed in a structured manner, rather than focusing solely on model fitting and final test set accuracy. In Exercise 1, the framework helped clarify the full predictive pipeline from data strategy to inference, while in Exercises 2 and 3 it helped me understand the importance of cross validation, hyperparameter tuning, regularization, and evaluation metrics best suited for each task.
+
+### 2. Compare methodological insights from classification (Exercise 2) vs. highdimensional regression (Exercise 3) 
+
+The classification task in Exercise 2 emphasized decision-focused modeling, where the primary challenges involved class imbalance, threshold selection, and the use of appropriate performance metrics such as precision, recall, and ROC curves rather than accuracy alone. In contrast, the high-dimensional regression setting in Exercise 3 highlighted the challenges of multicollinearity, rank deficiency, and overfitting when the number of predictors greatly exceeds the sample size. Classification required careful tuning to balance different types of misclassification error, and high-dimensional regression relied heavily on regularization, shrinkage priors, and dimensionality reduction to achieve stable estimation.
+
+### 3. Analyze the most significant technical growth from implementing state-of-the-art methods
+
+The most significant technical growth from this course was developing efficient models by understanding the mathematical foundations and assumptions required. This will help me from a practical perspective in the future. I also learned how to be creative when dealing with computational complexity (sub-sampling and dimensionality reduction).
+
+### 4. Provide detailed grade expectation with specific justifications across all exercises
+
+I expect a satisfactory overall grade on this assignment, though not as strong as my previous homeworks, as I was unable to be as thorough with all of the exercises. I believe I performed well on Exercise 1, as the project was strongly motivated by my personal experience. However, I was unable to fully complete Exercise 2 and could not explore additional causal machine learning methods in Exercise 4 (though learning about Double Machine Learning was still valuable and directly relevant to my thesis work).
+
+## Part B: Video Summary
+
+<https://youtu.be/0KGAcnGWQJY>

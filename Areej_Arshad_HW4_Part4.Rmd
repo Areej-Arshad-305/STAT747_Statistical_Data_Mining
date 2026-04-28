@@ -1,0 +1,97 @@
+---
+title: "STAT 747 - Homework 4"
+subtitle: "Exercise 4: Advanced Methods"
+author: "Areej Arshad"
+date: "2025-12-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Causal Machine Learning (DML)
+
+### a. Mathematical Foundations
+
+Double Machine Learning (DML) is a framework designed to estimate causal effect in settings with high-dimensional and nonlinear confounding using machine learning. The causal relationship is modeled as:
+
+$$
+Y = \theta T+ f(X) + \epsilon 
+$$
+
+where $Y$ is the outcome, $T$ is the treatment, $X$ is the high-dimensional set of covariates, and $\theta$ is the causal parameter of interest (Average Treatment Effect or Average Marginal treatment Effect).
+
+DML first uses flexible machine learning algorithms to estimate the nuisance functions $\hat{m}(X) = E[Y|X]$ and $\hat{l}(X) = E[T|X]$, capturing complex dependencies between covariates, treatment, and outcome. These estimates are then used to residualize both the outcome and the treatment as $\tilde{Y} = Y - \hat{m}(X)$ and $\tilde{T} = T - \hat{l}(X)$.
+
+In the final stage, the causal effect is obtained by regressing $\tilde{Y}$ on $\tilde{T}$, which yields an orthogonalized estimator robust to regularization bias from machine learning. This orthogonality property ensures that small errors in the nuisance models do not contaminate the causal estimate, allowing DML to combine the predictive power of machine learning with statistically valid causal inference.
+
+### b. Application to Fraud Data
+
+What is the causal impact of an international transaction on the probability of fraud, while adjusting for covariates like Transaction Amount, Speed, Time, Location, User and Merchant History?
+
+For this problem, probability of `Fraud` is the outcome ($Y$), `IntlFlag` is the treatment ($T$), and $\theta$ is the average causal rate of change in fraud probability for a one-unit increase in `IntlFlag`.
+
+```{r message=FALSE}
+library(DoubleML)
+library(mlr3)
+library(mlr3learners)
+
+fraud_data <- read.csv("financial_transactions.csv")
+
+# Outcome
+y <- fraud_data$Fraud
+
+# Continuous Treatment
+d <- fraud_data$IntlFlag
+
+# Covariates
+x <- fraud_data[, c(-1,-9)]
+
+# Combine data
+dml_data <- DoubleMLData$new(data = cbind(Fraud = y, IntlFlag = d, x),
+                             y_col = "Fraud", d_cols = "IntlFlag")
+
+# Regress X on Outcome and Treatment
+ml_l <- lrn("regr.ranger")   # Outcome model
+ml_m <- lrn("regr.ranger")   # Treatment model
+
+# Final regression
+dml_plr <- DoubleMLPLR$new(data = dml_data, ml_l = ml_l, ml_m = ml_m)
+
+# Fit the model
+dml_plr$fit()
+
+# Causal estimate (average marginal effect)
+dml_plr$summary()
+```
+
+The Double ML estimate indicates that a one-unit increase in international transaction intensity reduces the probability of fraud by approximately 5.0 percentage points on average, and this effect is highly statistically significant. This result should be interpreted under the assumption that all major confounders of international transaction intensity and fraud are observed and correctly controlled for.
+
+Compared to traditional causal and predictive approaches, Double Machine Learning (DML) offers substantial advantages in high-dimensional, nonlinear fraud settings. Standard logistic or linear regression models estimate associations under strong linearity and assumptions, making them vulnerable to bias when relationships between covariates, treatment, and outcome are complex. Matching and inverse probability weighting (IPW) struggle in high dimensions due to poor overlap, unstable weights, and sensitivity to propensity score misspecification.
+
+In contrast, DML flexibly uses machine learning to model both the outcome and treatment processes while employing orthogonalization to remove regularization bias, enabling valid statistical inference even with dozens of nonlinear behavioral and transaction features. As a result, DML retains the interpretability of a causal estimand while achieving the predictive flexibility of modern machine learning, making it particularly well-suited for fraud data where confounding is complex and traditional methods often fail to remain reliable.
+
+### c. Limitations and Future Work
+
+The main limitation of Double Machine Learning (DML) is its reliance on the unconfoundedness assumption, which requires that all relevant confounders of international transaction intensity and fraud are observed. In practice, unmeasured factors such as merchant security practices or coordinated fraud activity may still bias the results. Additionally, severe class imbalance in fraud data and limited overlap in the treatment distribution can affect the stability of the estimates.
+
+Future work could extend this analysis using Causal Forests to study heterogeneous effects across different user and transaction types. Time-varying DML models could also be used to capture evolving fraud patterns. Finally, integrating causal estimates into real-time fraud detection systems could support adaptive risk thresholds and improve operational decision-making.
+
+## 2. Explainable AI
+
+Explainable AI refers to a set of methods designed to make machine learning models transparent, and accountable, especially in industries or applications where stakeholders value interpretability over complex black-box models. Fraud detection is one example of such high-stakes domains, where models directly impact user trust, financial outcomes, and potential discrimination. Explainable AI plays a critical role in ensuring that model decisions are understandable, fair, and justifiable.
+
+### a. Fairness auditing on fraud models
+
+Fairness auditing evaluates whether a fraud detection model produces systematically biased outcomes across sensitive or proxy groups (such as location risk, international status, or device type). This involves comparing performance metrics like false positive rates, false negative rates, and prediction accuracy across different subgroups. For example, a fairness audit may reveal that international transactions are flagged as fraudulent at a much higher rate than domestic ones even after controlling for actual fraud prevalence. Such disparities can indicate algorithmic bias and motivate corrective interventions.
+
+### b. Counterfactual explanations
+
+Counterfactual explanations describe how a model’s prediction would change if certain features were minimally altered. Rather than explaining the entire model, they focus on individual decisions. For example, in a fraud setting, a counterfactual explanation might state: “This transaction was flagged as fraud because of high transaction speed and international status; if the transaction speed were lower, it would not have been flagged.” These explanations are especially valuable because they are intuitive, and actionable.
+
+### c. Fairness-aware training
+
+Fairness-aware training incorporates fairness constraints directly into the model training process so that predictions are not only accurate but also equitable. This can be done by adding penalty terms to the loss function for unfair outcomes, reweighting underrepresented groups, or enforcing constraints such as equal opportunity or equalized odds. In fraud detection, fairness-aware training could help reduce disproportionate false positives against specific transaction types or user groups.
+
+### 

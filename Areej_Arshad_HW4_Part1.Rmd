@@ -1,0 +1,97 @@
+---
+title: "STAT747 - Homework 4"
+subtitle: "Exercise 1: Nine Wheels Framework"
+author: "Areej Arshad"
+date: "2025-12-07"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## 1. Problem Formulation
+
+### a. Domain description and personal motivation
+
+Air pollution, particularly fine particulate matter (PM 2.5), is a severe environmental and public health problem in many countries around the world. Growing up in Pakistan, I have personal experience of living through repeated smog cycles every winter (particularly worse in the last 6-8 years) which disrupt daily life and cause respiratory illnesses. The air quality in my home city, Lahore, is also consistently poor. These lived experiences directly motivate this project, as it connects machine learning directly to an environmental hazard that has affected the health, mobility, and quality of life of both me and people around me.
+
+### b. Specific predictive/inferential question
+
+*Can next-day PM 2.5 concentration be accurately predicted using current meteorological conditions and temporal patterns?*
+
+A secondary inferential objective is to identify which weather variables (e.g wind speed, temperature, or humidity) are most strongly associated with high-pollution days.
+
+### c. Target variable and feature definition
+
+The target variable for this study is the daily average PM 2.5 concentration (µg/m³). The feature set includes key meteorological variables such as daily mean temperature, relative humidity, wind speed, and atmospheric pressure, along with temporal indicators including day of the week, month, and season for various regions of Pakistan. The spatial unit of these variables depends on data availability and may consist of smaller clusters within urban and rural areas; a binary indicator for urban versus rural classification may also be included. In addition, lagged PM 2.5 values from previous days could also be included to capture persistence in pollution levels.
+
+## 2. Data Strategy
+
+### a. Data sources and collection plan
+
+Daily PM 2.5 concentration data will be obtained from an open national or international air-quality monitoring database, while daily weather variables will be sourced from a nearby meteorological station or a global reanalysis product. Calendar variables such as weekdays, weekends, and seasonal indicators will be generated using date information. All data sources will be merged using the date as the common key.
+
+### b. Feature engineering pipeline
+
+Feature engineering would include constructing lagged PM 2.5 variables (1-day and 2-day lags), generating moving averages to capture short-term pollution accumulation. Continuous meteorological variables will be standardized for models that are sensitive to feature scale. The problem will be addressed primarily from a regression perspective to allow for continuous prediction of pollution levels, which is more directly useful for public health planning and policy decision-making.
+
+### c. Data quality mitigation strategies
+
+Missing measurements will be handled using interpolation for short gaps and exclusion for long missing periods. Outliers will be identified using both statistical thresholds and physical plausibility checks. To prevent information leakage, the dataset will be split chronologically, with earlier years used for training and later years reserved strictly for testing.
+
+## 3. Function Space & Learning
+
+### a. Function space specification
+
+Four model classes will be considered: Elastic Net regression as a regularized linear baseline, Random Forest regression for nonlinear interactions, Gradient Boosting Machines (GBM) for high predictive accuracy, and optionally Support Vector Regression (SVR) with an RBF kernel for smooth nonlinear function estimation.
+
+### b. Learning principles and criteria
+
+This is a supervised learning problem where the objective is to learn a function mapping weather and temporal features to daily PM 2.5 concentration. Models are trained using empirical risk minimization with regularization to balance bias and variance. Performance is evaluated using out-of-sample prediction error, primarily RMSE and MAE.
+
+### c. Optimization approaches
+
+Elastic Net parameters are estimated using convex optimization via coordinate descent, while Random Forest models use greedy recursive partitioning with feature subsampling at each split. In addition, Gradient Boosting uses stage-wise additive optimization, fitting successive trees to residuals and Support Vector Regression is solved using quadratic programming under regularization constraints.
+
+### 4. Regularization & Selection
+
+### a. Regularization strategies
+
+Elastic Net applies combined L1 and L2 penalties to shrink coefficients and handle multicollinearity. Random Forest and GBM models are regularized using maximum tree depth, minimum node size, learning rate, and subsampling ratios. Moroever, SVR regularization is controlled through the cost parameter and kernel bandwidth.
+
+### b. Model selection framework
+
+A temporally structured train–validation–test split will be used to ensure realistic forecasting evaluation. Hyperparameters will be tuned using cross-validation within the training period, with final performance assessed on the held-out test set.
+
+### c. Refinement procedures
+
+Residual analysis will be conducted across different seasons to detect systematic prediction errors, particularly during severe winter smog periods. The feature set will be iteratively refined by adding or removing lag terms and appropriate nonlinear transformations based on model diagnostics. Overall, preference will be given to simpler models when predictive performance is comparable, in order to ensure greater interpretability for stakeholders and policymakers.
+
+### 5. Inference & Deployment
+
+### a. Uncertainty quantification methods
+
+For linear models, confidence intervals for coefficients and predicted values will be obtained using standard error estimates. For ensemble models, uncertainty will be assessed using bootstrap-based prediction intervals. Conformal prediction may also be applied to provide valid, distribution-free prediction intervals for daily PM 2.5 forecasts.
+
+### b. Theoretical justification
+
+Elastic Net estimators arise from convex optimization and provide stable solutions in high-correlation settings, which is useful in the case of meteorological and temporal data. Tree-based ensemble methods approximate complex nonlinear relationships through aggregation and are supported by theoretical consistency under regularity conditions. Support Vector Regression (SVR) works by finding a smooth function that best fits the data while controlling prediction error, making it effective for capturing nonlinear patterns.
+
+### c. Deployment and scalability considerations
+
+The final model can be deployed as a daily forecasting tool that takes current weather forecasts as inputs and outputs next-day PM 2.5 predictions. The system is computationally efficient for real-time use and can be updated periodically as new data become available. Such a tool could support public health warnings during extreme smog episodes in cities like Lahore.
+
+### 6. Technical Specification
+
+### a. Mathematical model formulations
+
+In the linear formulation, PM 2.5 at time $t$ is modeled as $y_t = x_t^T\beta + \epsilon_t$ where $x_t$ represents lagged pollution, meteorological, and temporal features. The Elastic Net estimator minimizes mean squared error with combined L1 and L2​ regularization to control model complexity and multicollinearity. Random Forest predictions are constructed by averaging outputs across multiple randomized regression trees to capture nonlinear relationships. Support Vector Regression (SVR) models PM 2.5 by fitting a function that allows for small errors within a specified tolerance while penalizing larger deviations, enabling flexible nonlinear prediction through kernel functions.
+
+### b. Loss functions and optimization criteria
+
+The primary loss function is mean squared error, which penalizes large deviations between predicted and observed PM 2.5 values. Mean absolute error is also used for robustness to extreme pollution spikes. Hyperparameters are selected by minimizing cross-validated prediction error.
+
+### c. Inference procedures
+
+For linear models, classical statistical inference is used to test whether meteorological variables such as wind speed or temperature are significantly associated with PM 2.5. For nonlinear models, inference is based on resampling methods, feature importance measures, and partial dependence plots to interpret variable effects on pollution levels.

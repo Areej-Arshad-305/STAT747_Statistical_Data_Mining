@@ -1,0 +1,437 @@
+---
+title: "STAT 747 - Homework 1"
+author: "Areej Arshad"
+date: "2025-09-22"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(dplyr)
+library(MASS)   
+library(class)    
+library(patchwork)
+library(FNN) 
+library(tidyr)
+```
+
+## Part 1: The Nine Wheels Framework
+
+### Question 1
+
+a)  The central business problem here is to predict re-admission of patients within 30 days, with the aim of improving efficiency in resource allocation and care planning. This is a binary classification problem using supervised learning.
+
+    The dataset $(\mathcal{D}_{n})$ consists of $n$ pairs/observations $(x_{i}, y_{i})$ of independent and identically distributed inputs $(\mathcal{X})$ and outputs $(\mathcal{Y})$ drawn from a joint probability distribution $p_{xy}(x,y)$.
+
+    $$ 
+    \mathcal{D}_{n} = \{(x_{i}, y_{i}) \overset{\text{i.i.d}}{\thicksim} p_{XY}(x,y), \space x_{i} \in \mathcal{X}, \space y_{i} \in \mathcal{Y}, \space i = 1,2,...,n\}
+    $$
+
+    The input space $(\mathcal{X \subset \mathbb{R^{p}} } , \text{where p is the number of features})$ includes patient characteristics relevant to re-admission risk, including demographic and socioeconomic data (e.g age, gender, occupation), vitals (e.g resting heart rate, blood pressure), functional status, severity of illness, medication regimen, comorbidities, and prior hospitalization history.
+
+    The output space $(Y \subset \mathbb{R})$ is a binary variable indicating whether a patient is re-admitted within 30 days.
+
+    $$
+    Y = 
+    \begin{cases} 
+    1 & \text{if patient is re-admitted within 30 days} \\ 
+    0 & \text{otherwise;} 
+    \end{cases} 
+    $$
+
+    The hypothesis space $(\mathcal{H})$ is the set of the candidate classification functions that map the input space $(\mathcal{X})$ to the output space $(\mathcal{Y})$. This can include KNNs, linear or quadratic discriminants, logistic regression, random forest, or neural network algorithms.
+
+    $$
+    \mathcal{H} = \{f_{\theta}:\mathcal{X}\rightarrow \mathcal{Y}, \theta \in \Theta\} \qquad \text{ where } \Theta \text{ is the set of parameters required for the candidate functions}
+    $$
+
+    The loss function is a non-negative bivariate function $(\mathcal{L}: \mathcal{Y} \text{ x } \mathcal{Y} \rightarrow \mathbb{R_{+}})$ which measures the discrepancy between the output space $(\mathcal{Y})$ and the predicted values $(f\mathcal{(X)})$. For this problem, we can have 0-1 loss or a form of asymmetric loss in case the company wants to penalize either false positives or false negatives more over the other.
+
+    $$
+    \mathcal{L} = \begin{cases}
+    0 & y \neq f(x) \\ 
+    a & y = 1 \text{ and } f(x) = 0, \text{ false negative} \\
+    b & y = 0 \text{ and } f(x) = 1, \text{ false positive}
+    \end{cases} \\
+    \text{ for 0-1 loss, } a = b = 1
+    $$
+
+b)  Accuracy is the proportion of correct predictions and captures both false positives and false negatives.
+
+    $$
+    Accuracy = \frac{\text{True Positives + True Negatives}} {\text{True Positives + False Positives + True Negatives + False Negatives}}
+    $$
+
+    Precision is the proportion of correct classifications among the positive classifications and captures only the false positive rate.
+
+    $$
+    Precision = \frac{\text{True Positives}}{\text{True Positives + False Positives}}
+    $$
+
+    A high false positive rate means that a large number of patients who got flagged did not get re-admitted after 30 days. This would put the company at risk of wasting allocated resources. A high false negative would mean that patients who did not get flagged got re-admitted. This would risk patients not getting the required care and potentially having to transfer to another hospital or care facility. Both scenarios are detrimental, but the company would be more concerned with precision due to the cost implications of false positives.
+
+c)  In healthcare, data veracity is the degree to which the data is accurate, complete, consistent, and representative of the target population. Callenges in data veracity can arise from missing or incomplete records (e.g medical history scattered across multiple hospitals), noisy or incorrect entries (e.g unstructured clinical notes, typographical errors, device malfunctions), or bias (under-representation of women, racial/ethnic minorities, sexual and gender minorities).
+
+### Question 2
+
+a)  The Bayes classifier $f^*(x)$ is the theoretical function that maximizes the posterior probability of class membership:
+
+    $$ f^{*}(x) 
+    = arg\underset{f}min \text{   }\{\mathbb{E} \space [ \mathcal{L}(f(x),y)] \}
+    = arg \underset{y \in \mathcal{Y}} {max} \space \{Pr \space [\mathcal{Y} 
+    = y \text{ | }x, \space y \in \mathcal{Y}, \space x \in \mathcal{X} \space ]\} $$The associated Bayes risk $(R^*)$ is the minimum achievable expected loss:
+
+    $$
+    R^* = R(f^*) = inf \space \{ \mathbb{E} \space [ \mathcal{L}(f(x), y)] \} $$The form of the Bayes classifier depends on the loss; under the 0-1 loss, it minimizes the rate of misclassification:
+
+    $$ f^{*}(x) 
+    = arg\underset{f}min \text{   } \{ \mathbb{E} \space [ \mathcal{L}(f(x),y)] \}
+    = arg\underset{f}min \text{   } \{ \mathbb{E} \space [ \mathbf{1}(y \neq f(x)] \}
+    = arg\underset{f}min \text{   } \{ Pr \space [ y \neq f(x)] \}
+    $$
+
+    $$
+    R^* 
+    = inf \text{   } \{ \mathbb{E} \space [ \mathbf{1}(y \neq f(x))] \} 
+    = inf \text{   } \{ Pr \space [ y \neq f(x)] \}
+    $$The Bayes classifier achieves the theoretical optimum risk (typically non-zero) for any given loss and data distribution, hence it is the theoretical gold standard. In practice, the distribution is unknown and estimated from the available data; no empirical classifier can achieve lower risk than Bayes.
+
+b)  As the number of training samples $(n)$ grows larger, the asymptotic misclassification error rate is bounded by twice the Bayes risk.
+
+    $$
+    \underset{n \rightarrow \infty}{lim} R(\hat{f}^{(n)}_{kNN}) = R^* \qquad \text{where k(n)} \rightarrow \infty, \space \frac{k(n)}{n} \rightarrow 0
+    $$\
+    The number of neighbors $(k)$ needs to be optimized based on the bias-variance trade off; $(k)$ increases with $(n)$, but at a slower rate such that $\frac{k}{n} \rightarrow 0$
+
+c)  With a small $k$, the algorithm averages over fewer values; yielding complex decision boundaries and higher variance with low bias. As $k$ increases (with n), the algorithm averages over more neighbors, resulting in smoother boundaries and lower variance but a higher bias. The universal consistency conditions guide the value of $k$ to the optimum such that the risk converges to Bayes risk. In practice, even with a fixed $n$, $k$ is selected from a set of candidate values through cross validation (with the goal to minimize optimism).
+
+## Part 2: K-Nearest Neighbors Learning
+
+### Question 3
+
+a)  The features in the given space have different units. Using simple Euclidean distance could result in weight and cholesterol dominating the computation because of the square term. Therefore, standardized Euclidean distance would be the most appropriate metric.
+
+$$
+d(x_{i}, x_{j}) = \sqrt{\sum_{k=1}^3(\frac{x_{ik}-x_{jk}}{s_{k}})}
+$$
+
+b)  As the number of features p grows, the data becomes sparse in the high dimensional space. The distance metric loses discriminative power as pairwise distances all increase in value, making the nearest and furthest neighbors more difficult to distinguish.
+
+c)  Feature scaling (standardization) and dimensionality reduction (e.g through PCA) are important to ensure that variables with larger numeric values do not dominate the distance computation and to mitigate the curse of dimensionality, respectively.
+
+### Question 4
+
+a)  The value of $k$ directly affects the variance and bias of the hypothesis space. A K-NN with a small $k$ adapts closely to the training data with irregular decision boundaries, resulting in a high complexity model with high variance and low bias. On the other hand, a large value of $k$ averages across more neighbors with smoother decision boundaries, resulting in a less complex model with low variance but high bias. A 1-NN is a high capacity (and high complexity) model as it can represent a larger set of possible decision boundaries.
+
+b)  The number of neighbors $(k)$ has an inverse relationship with model complexity. With small $k$, training error is near zero but the model overfits, leading to a large gap (optimism) between training and test performance. As $k$ increases, training error rises, optimism shrinks, and the model underfits. The optimal $k$ (indicated by the dotted vertical line) balances this trade off, minimizing test error.
+
+```{r echo=FALSE, fig.width=8, fig.height=3}
+library(patchwork)
+
+df <- data.frame(k = 1:50) 
+df <- df |> mutate(complexity = 1/sqrt(k), 
+                  "Training error" = exp(0.095*k)-0.1*k,
+                  "Test error" = exp(0.099*k) - 1.3*k + 50)
+
+plot.1 <- ggplot(df, aes(k, complexity)) + 
+  geom_line(linewidth = 0.6, color = "steelblue") +
+  labs(title="Model Complexity vs k (k-NN)",
+       x="k (number of neighbors)",
+       y="Model Complexity") +
+  theme(axis.text.y = element_blank(),
+      axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8))
+
+library(tidyr)
+
+# Reshape to long format for train/test error
+df_long <- df |> 
+  pivot_longer(cols = c("Training error", "Test error"),
+               names_to = "error_type",
+               values_to = "error")
+
+plot.2 <- ggplot(df_long, aes(k, error, color = error_type)) +
+  geom_line(linewidth = 0.6) +
+  labs(title = "Prediction error vs k (k-NN)",
+       x = "k (number of neighbors)",
+       y = "Prediction error",
+       color = "Error Type") +   # legend title
+  geom_vline(xintercept = 26, linetype = "dashed", color = "black", linewidth = 0.4) +
+    annotate("text", x = min(df$k) + 2, y = max(df_long$error), 
+           label = "Overfitting", hjust = 0, vjust = 1, size = 3) +
+  annotate("text", x = max(df$k) - 3, y = max(df_long$error), 
+           label = "Underfitting", hjust = 1, vjust = 1, size = 3) +
+  theme(axis.text.y = element_blank(),
+        axis.ticks.y = element_blank(),
+        axis.text.x = element_blank(),
+        axis.ticks.x = element_blank(),
+        plot.title = element_text(size = 10),
+        legend.title = element_text(size = 8),
+        legend.text = element_text(size = 8),
+        axis.title.x = element_text(size = 8),
+        axis.title.y = element_text(size = 8))
+
+    
+
+plot.1 + plot.2
+```
+
+c)  K-NN is a simple method that does not assume an underlying model and works with distances, making it easy to understand and implement. However, it is computationally expensive in prediction and scales poorly to large datasets.
+
+    Logistic regression has better interpretability; it is a well-defined model based on log odds, with explicit parameters $(\beta_{i})$ that quantify how the features affect the outcome. However, it is limited to binary classification in its basic form.
+
+## Part 3: Contrasting Learning Paradigms
+
+### Question 5
+
+a)  We have the following prior probabilities:
+
+    $$
+    \begin{aligned}
+    \pi_1 = Pr[Y = C_1], \qquad \pi_2 =  Pr[Y = C_2]
+    \end{aligned}
+    $$
+
+    and class conditional densities:
+
+    $$ 
+    \begin{aligned}
+    Pr(x|C_k) 
+    = \mathcal{N}(x|\mu_k, \Sigma) 
+    = \frac{1}{2\pi^{p/2}|\Sigma|^{1/2}} \exp \left(\frac{-1}{2} (x-\mu_k)^T \Sigma^{-1} (x-\mu_k) \right)
+    \end{aligned} \qquad \qquad (1)
+    $$
+
+    where $k \in \{1,2\}$, and $p$ is the dimensionality of the input space $\mathcal{X}$. Moreover, ${\mu}_k$ is a class-conditional mean vector of features with dimension $(p\text{ x }1)$, and $\Sigma$ is the pooled covariance matrix with dimension $(p \text{ x } p)$.
+
+    Therefore, using the Bayes theorem:
+
+    $$
+    \begin{aligned}
+    \log \left( \frac{Pr(C_1|x)}{Pr(C_2|x)} \right) 
+    = \log \left(\frac{\frac{Pr(x|C_1)Pr(C_1)}{Pr(x)}}{\frac{Pr(x|C_2)Pr(C_2)}{Pr(x)}} \right)
+    = \log \left( \frac{\pi_1.Pr(x|C_1)}{\pi_2.Pr(x|C_2)} \right)
+    \qquad \qquad \qquad \qquad (2)
+    \end{aligned}
+    $$
+
+    Substitute (1) in (2) and simplify:
+
+    $$
+    \begin{aligned}
+    \log \left( \frac{Pr(C_1|x)}{Pr(C_2|x)} \right) &= \log \left[
+    \frac{\pi_1.\frac{1}{2\pi^{p/2} |\Sigma|^{1/2}} \exp \left(\frac{-1}{2} (x-\mu_1)^T \Sigma^{-1} (x-\mu_1)\right)}
+    {\pi_2.\frac{1}{2\pi^{p/2} |\Sigma|^{1/2}} \exp \left(\frac{-1}{2} (x-\mu_2)^T \Sigma^{-1} (x-\mu_2)\right)} \right] \\
+    &= \log \left[ \frac{\pi_1}{\pi_2} \right]
+    + \log\left[\exp\left(\frac{(-1)}{2} (x-\mu_1)^T \Sigma^{-1} (x-\mu_1)\right)\right] \\
+    &\qquad \qquad \quad - \log\left[\exp\left(\frac{(-1)}{2} (x-\mu_2)^T \Sigma^{-1} (x-\mu_2)\right)\right] \\
+    &= \log \left[ \frac{\pi_1}{\pi_2} \right]
+    - \frac{1}{2} \left[(x-\mu_1)^T \Sigma^{-1} (x-\mu_1)
+    - (x-\mu_2)^T \Sigma^{-1} (x-\mu_2)\right] 
+    \qquad (3)
+    \end{aligned}
+    $$
+
+    The quadratic term in (3) can be expanded in the following way:
+
+    $$
+    (x-\mu_k)^{T} {\Sigma}^{-1}(x-\mu_k) 
+    = x^T {\Sigma}^{-1}x - 2\mu_k^T{\Sigma}^{-1}x + \mu_k^T{\Sigma}^{-1}\mu_k
+    $$ Hence, the difference simplifies to:
+
+    $$
+    \begin{aligned}
+    [][(x-\mu_1)^{T} {\Sigma}^{-1}(x-\mu_1)] &- [(x-\mu_2)^{T} {\Sigma}^{-1}(x-\mu_2)] \\
+    &= (x^T {\Sigma}^{-1}x - 2\mu_1^T{\Sigma}^{-1}x + \mu_1^T{\Sigma}^{-1}\mu_1) \\
+    &\qquad - (x^T {\Sigma}^{-1}x - 2\mu_2^T{\Sigma}^{-1}x + \mu_2^T{\Sigma}^{-1}\mu_2) \\
+    &= - 2\mu_1^T{\Sigma}^{-1}x + \mu_1^T{\Sigma}^{-1}\mu_1 + 2\mu_2^T{\Sigma}^{-1}x - \mu_2^T{\Sigma}^{-1}\mu_2 \\
+    &= 2(\mu_2-\mu_1)^T{\Sigma}^{-1}x +(\mu_1^T{\Sigma}^{-1}\mu_1-\mu_2^T{\Sigma}^{-1}\mu_2) 
+    \qquad \qquad \qquad \qquad (4)
+    \end{aligned}
+    $$
+
+    Substitute (4) in (3) and the log odds finally simplifies to:
+
+    $$
+    \begin{aligned} 
+    \log \left( \frac{Pr(C_1|x)}{Pr(C_2|x)} \right)
+    &= \log \left[ \frac{\pi_1}{\pi_2} \right] - \frac{1}{2} \left[2(\mu_2-\mu_1)^T{\Sigma}^{-1}x +(\mu_1^T{\Sigma}^{-1}\mu_1-\mu_2^T{\Sigma}^{-1}\mu_2)\right] \\ 
+    &= \log \left[ \frac{\pi_1}{\pi_2} \right] - (\mu_2-\mu_1)^T{\Sigma}^{-1}x - \frac{1}{2}(\mu_1^T{\Sigma}^{-1}\mu_1-\mu_2^T{\Sigma}^{-1}\mu_2) \\
+    &= \log \left[ \frac{\pi_1}{\pi_2} \right] + (\mu_1-\mu_2)^T{\Sigma}^{-1}x + \frac{1}{2}(\mu_2^T{\Sigma}^{-1}\mu_2-\mu_1^T{\Sigma}^{-1}\mu_1) 
+    \end{aligned}
+    $$
+
+    The decision boundary is represented by the region where the posterior probabilities of $C_1$ and $C_2$ are equal, i.e when the log odds is equal to zero.
+
+    $$
+    \log \left[ \frac{\pi_1}{\pi_2} \right] + (\mu_1-\mu_2)^T{\Sigma}^{-1}x + \frac{1}{2}(\mu_2^T{\Sigma}^{-1}\mu_2-\mu_1^T{\Sigma}^{-1}\mu_1) = 0
+    $$
+
+    This is a linear equation in $x$, defining a hyperplane in a $p$ dimensional space:
+
+    $$
+    x^T\beta_1 - \beta_0 = 0 \\ 
+    \text{where } \beta_1 = (\mu_1-\mu_2)^T{\Sigma}^{-1}, \text{ and } \beta_0 = \log \left[ \frac{\pi_1}{\pi_2}\right] + \frac{1}{2}(\mu_2^T{\Sigma}^{-1}\mu_2-\mu_1^T{\Sigma}^{-1}\mu_1)
+    $$
+
+b)  Given a training dataset with $n$ data points $(x_{i}, y_{i})$, where $y_i \in \{C_1, C_2\}$ and $x$ has $p$ features, the MLEs for the class means are:
+
+    $$
+    \widehat{\mu}_1 = \frac{1}{n_1} \sum_{i: y_{i}=C_1} x_i \\
+    \widehat{\mu}_2 = \frac{1}{n_2} \sum_{i: y_{i}=C_2}^{n_2} x_i \\
+    \text{where } n_1 + n_2 = n, \text{ and } \widehat{\mu}_1, \widehat{\mu}_2 \text{ have dimension } (p \text{ x }1) $$The MLE for the pooled covariance matrix is:$$
+    \begin{aligned}
+    \widehat{\Sigma} &= \frac{1}{n} \sum_{k=1}^2 \sum_{i: y_i = C_k} (x_i - \widehat{\mu}_k) (x_i - \widehat{\mu}_k)^T \\
+    &= \frac{n_1}{n} \widehat{\Sigma}_1 + \frac{n_2}{n} \widehat{\Sigma}_2
+    \end{aligned} 
+    $$
+
+c)  The MLE for the shared covariance matrix pools the covariances of the two classes, weighted by its proportion of the total data. The pooling assumes that although class means may differ, the Gaussian distributions share the same underlying shape and orientation (hence the multivariate Gaussian).
+
+    Since only one covariance matrix is estimated from the entire training dataset, the main advantage of this pooling is the reduction in the number of parameters. This increases the effective sample size, leading to a more robust and less variable estimate. It is also less computationally expensive, especially with large datasets and multi-class problems.
+
+### Question 6
+
+a)  Given that we have a dataset:
+
+    $$
+    \mathcal{D}_{n} = \{(x_{i}, y_{i}) \overset{\text{i.i.d}}{\thicksim} p_{XY}(x,y), \space x_{i} \in \mathcal{X}, \space y_{i} \in \mathcal{Y}, \space i = 1,2,...,n\}, \mathcal{Y}=\{1,...,G\} \text{ and } \mathcal{X} \in \mathbb{R}^p
+    $$
+
+    With a selected distance metric and value of $k$, let a new data point be $x$. The kNN algorithm computes the distance between $x$ and all the existing $n$ data points.
+
+    $$
+    d_i = d(x, x_i) \qquad i=1,...,n
+    $$
+
+    Since the input space is $p$-dimensional, each distance calculation involves $p$ operations. Therefore, calculating all the distances involves $n*p$ operations ($O(np)$ complexity). The algorithm then ranks all the distances in increasing order and selects the smallest $k$ distances. Using the quick sort method, this step would have complexity $O(n \space log \space n)$. The combined complexity of these steps is:
+
+    $$ O(np \space + n \space log \space n) = O(np) \qquad \text{non-dominant term is dropped} $$
+
+b)  Since kNN does not build a model during training, it must compute and store distance from every query point to all $n$ training data points for prediction. The distance computation grows linearly with the number of samples $(n)$ and features $(d)$. The combination of large $n$ and $d$ creates a multiplicative effect on complexity, making kNN computationally expensive for real time applications and resulting in poor scalability.
+
+c)  A k-decision tree is a binary search tree that recursively partitions the data space along different feature dimensions, creating nested regions to accelerate nearest neighbor search. To make predictions, regions with a low chance of containing the nearest points are excluded, reducing the number of distance calculations. K-d trees are effective for low to moderate dimensional data $(d \leq 20)$. In higher dimensions, the partitions become less informative and performance approaches that of the naive method.
+
+## Part 4: Computational Demonstration
+
+### Question 7
+
+```{r, fig.width=8, fig.height=4}
+
+demonstrate_knn_tradeoff <- function(){
+  set.seed(747)
+  n <- 100
+  
+  # Generate simple non-linear data (e.g., sine wave + noise)
+  train_x <- matrix(runif(n, 0, 2*pi), ncol=1)
+  train_y <- matrix(sin(train_x) + rnorm(n, sd=0.3), ncol=1)
+  test_x <- matrix(seq(0, 2*pi, length.out=n), ncol=1)
+  true_y <- matrix(sin(test_x), ncol=1)
+  
+  # Specify the vector of k values
+  k_values <- c(1, 5, 10, 20, 50, 100)
+  
+  # Predict test_y and store values in a long form dataframe 
+  predictions_df <- sapply(k_values, function(k_values) {
+    knn.reg(train=train_x, test=test_x, y=train_y, k=k_values)$pred}) |> 
+    data.frame() |> 
+    cbind(test_x, true_y) |>
+    setNames(c(paste0("k_",k_values), "test_x", "true_y")) |>
+    pivot_longer(cols = starts_with("k_"), names_to = "k", values_to = "pred") |>
+    mutate(k=factor(k, levels=c("k_1", "k_5", "k_10", "k_20", "k_50", "k_100")))
+  
+  # For plotting the raw training points
+  train_df <- data.frame(x = train_x, y = train_y)
+  
+  # Setting label names for plotting
+  k_labels <- setNames(c("k = 1", "k = 5", "k = 10", "k = 20", "k = 50", "k = 100"),
+                       c("k_1", "k_5", "k_10", "k_20", "k_50", "k_100"))
+  
+  # Plotting in a 2x3 grid
+  ggplot(predictions_df, aes(x=test_x)) +
+    geom_line(aes(y=true_y, color="True function"), linewidth=0.7) +
+    geom_line(aes(y=pred, color="Predictions"), linewidth=0.6) +
+    geom_point(data = train_df,
+             aes(x = x, y = y, color = "Training data"), 
+             inherit.aes = FALSE, size = 0.5, alpha = 0.5) +
+    facet_wrap(~ k, ncol = 3, labeller = labeller(k = k_labels)) +
+    scale_color_manual(name = "Type", 
+                       values = c("True function" = "black", 
+                                  "Predictions"   = "dodgerblue",
+                                  "Training data" = "brown")) +
+    labs(title = "Bias–Variance Tradeoff in kNN Regression",
+         x = "x (radians)",
+         y = "y") +
+    theme_minimal()
+} 
+
+demonstrate_knn_tradeoff()
+```
+
+As discussed in Question 4, the value of $k$ drives the bias variance trade-off. For small values of $k$ (like 1 or 5), the prediction curve is close to the true sine function (low bias) but has high variance (depicted by the jagged lines) and, hence, results in overfitting. As the value of $k$ increases, the predictions become smoother (lower variance) but stray further away from the true function (higher bias), resulting in underfitting. For the given dataset, an intermediate values such as $k=10 \text{ or } 20$ achieve a reasonable balance between bias and variance, reducing expected prediction error.
+
+### Question 8
+
+```{r, fig.width=10, fig.height=5}
+contrast_models <- function() {
+  set.seed(747)
+
+  # Generate data from two Gaussian classes with SOME overlap
+  n <- 50
+  class_1 <- MASS::mvrnorm(n, mu = c(0,0), Sigma = matrix(c(1, 0.5, 0.5, 1), 2))
+  class_2 <- MASS::mvrnorm(n, mu = c(1.5,1.5), Sigma = matrix(c(1, 0.5, 0.5, 1), 2))
+  data <- data.frame(rbind(class_1, class_2), class = factor(rep(c(1,2), each=n)))
+  names(data) <- c("X1", "X2", "Class")
+
+  # Create a grid to plot decision boundaries
+  grid <- expand.grid(X1 = seq(-3, 4.5, length=100), X2 = seq(-3, 4.5, length=100))
+  
+  # Fit a knn model and predict on the grid
+  knn_pred <- knn(train=data[,c("X1", "X2")], test=grid, cl=data$Class, k=5)
+  grid <- cbind(grid, as.factor(knn_pred))
+
+  # Fit an LDA model and predict on the grid
+  lda_fit <- MASS::lda(Class ~ X1 + X2, data = data)
+  lda_pred <- predict(lda_fit, newdata = grid)$class
+  grid <- cbind(grid, as.factor(lda_pred))
+
+  # Plot decision boundaries for knn
+  knn_plot <- ggplot() +
+    geom_tile(data = grid, aes(X1, X2, fill = knn_pred), alpha = 0.3) +
+    geom_point(data = data, aes(X1, X2, color = Class), size = 1) +
+    labs(title = "Predictions with k-NN (k=5)", fill = "Prediction") +
+    coord_equal() +
+    theme_minimal()
+
+  # Plot decision boundary for LDA
+  lda_plot <- ggplot() +
+    geom_tile(data = grid, aes(X1, X2, fill = lda_pred), alpha = 0.3) +
+    geom_point(data = data, aes(X1, X2, color = Class), size = 1) +
+    labs(title = "Predictions with LDA", fill = "Prediction") +
+    coord_equal() +
+    theme_minimal()
+  
+  knn_plot + lda_plot
+}
+
+contrast_models()
+```
+
+The k-NN boundary is an irregular shape, since the k-NN method does not assume any inherent model or distribution and computes predictions based on distances. LDA, by contrast, assumes gaussian classes with a common covariance and therefore produces a linear boundary. In this dataset where classes overlap non-linearly, the k-NN boundary is more flexible and better at capturing the complexity. LDA's simplicity can lead to a higher misclassification rate near the boundary.
+
+## Part 5: Video Presentation
+
+<https://youtu.be/0J6R1_UC5Tk>
+
+## Part 6: Self Evaluation
+
+a)  I feel most confident with the concepts related to k-NN, particularly the bias–variance tradeoff and the curse of dimensionality. With my mathematics background, I can follow the proofs, though I would like to strengthen my comfort with them further. I also want to continue solidifying my coding skills, especially in writing efficient code, even though I already have experience in R and Python.
+
+b)  I expect to earn around a low A or high B on this homework. The exercises on Q2a and Q4b required extra time to fully grasp, and Q5 was the most difficult for me. I also needed some effort to figure out the plotting in Q7. However, the remaining questions felt straightforward, which gives me confidence in my overall performance.

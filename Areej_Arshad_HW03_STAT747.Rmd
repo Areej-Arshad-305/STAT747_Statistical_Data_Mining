@@ -1,0 +1,1162 @@
+---
+title: "STAT747 Homework 3"
+author: "Areej Arshad"
+date: "2025-11-06"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(tidyr)
+library(patchwork)
+library(gridExtra)
+library(yardstick)
+library(caret)
+library(rpart)
+library(rpart.plot)
+library(car) 
+library(e1071)
+library(randomForest)
+library(gbm)
+library(pdp)
+library(tibble)
+
+```
+
+## 1. Theoretical Foundations
+
+### Part A: Support Vector Machines
+
+#### Question 1: The Primal-Dual Gap
+
+a.  Alice's soft margin SVM solver fails to implement one of the stationarity conditions of the Lagrangian that leads to the constraint $0 \leq \alpha_i \leq C$ of the dual problem, as detailed below:
+
+    $$
+    \begin{aligned}
+    \frac{\partial \mathcal{L}}{\partial \xi_i} = 0 &\implies C - \alpha_i - \mu_i = 0 \implies \mu_i = C - \alpha_i \\
+    &\text{since } \mu_i \geq 0 \implies 0 \leq \alpha_i \leq C
+    \end{aligned}
+    $$
+
+    Failure to impose this constraint violates the KKT conditions (since $\alpha_i > C$ leads to $\mu_i < 0$), removing the slack variables ($\xi_i$) from the optimization. The solver then behaves as a hard margin SVM, which does not allow any margin violations or misclassifications.
+
+b.  The goal of the primal SVM formulation is to find the separating hyperplane ($w^Tx + b = 0$) that maximizes the minimum distance between the hyperplane and the closest data points of each class. The margin width is $\frac{2}{||w||}$, therefore, minimizing $\frac{1}{2}||w||^2$ in the objective function maximizes the margin. When the data is not linearly separable, slack variables ($\xi_i > 0$) are introduced ($y_i(w^Tx+b) < 1 - \xi_i$) to allow some points to:
+
+    -   be correctly classified and lie inside the margin ($0<\xi_i<1$)
+
+        This allows $0<w^Tx + b < 1$ for class $y_i=+1$, and $-1<w^Tx + b <0$ for class $y_i=-1$.
+
+    -   misclassified ($\xi_i> 1$)
+
+        Allowing $w^Tx+b < 0$ For class $y_i=+1$, and $w^Tx+b > 0$ For class $y_i=-1$
+
+    The parameter $C$ controls the bias-variance trade-off. A large value of $C$ penalizes violations, leading to a narrower margin (lower bias but high variance) that tries to classify all points correctly and risks overfitting. On the other hand, smaller values of $C$ penalize the complexity of the model, leading to a wider margin (higher bias but lower variance) and higher risk of underfitting.
+
+c.  The solver optimizes a hard margin SVM without the $\alpha_i<C$ constraint. With linearly separable data, the optimal $\alpha_i's$ can exceed $C$ if required, but remain finite due to the quadratic term in the dual objective function. Since the hard margin does not allow misclassifications or margin violations, the resulting solution has a narrower margin and larger $||w||$ as compared to the correct soft margin solution.
+
+d.  If the solver omits the $\alpha_i<C$ constraint, then the multipliers for the non-negativity constraint of slack variables ($\mu_i = C - \alpha_i$) can become negative. This violates the KKT condition, forcing $\xi_i=0$ for all the points. Consequently, the model turns into a hard-margin SVM which cannot handle outliers or overlapping classes since each point must lie on our outside the margins, leading to instability when the data is not linearly separable.
+
+#### Question 2: The Kernel Trick
+
+a.  The prediction function for linearly separable data is:
+
+    $$
+    f(x_{new}) = sign (\langle w,x_{new}\rangle + b)
+    $$
+
+    For the non-linear case, we consider the soft margin SVM in a higher dimensional feature space transformed using a feature map $\phi:x\mapsto\phi(x)$. The prediction function becomes: $$
+    f(x_{new}) = sign (\langle w,\phi(x_{new})\rangle + b) \tag{1}
+    $$
+
+    From the stationarity conditions of the Lagrangian, we obtain:
+
+    $$
+    \underset{w, b, \xi_i}{min} \frac{1}{2}||w||^2 + C \sum_{i=1}^{n}\xi_i 
+    \qquad \text{s.t} 
+    \qquad y_i(w^T\phi(x)+b) \geq 1,
+    \quad \xi_i \geq 0, 
+    \quad i=1,...,n
+    $$
+
+    $$
+    \mathcal{L} (w, b, \xi_i) 
+    = \frac{1}{2}||w||^2 
+    + C \sum_{i=1}^{n}\xi_i 
+    - \sum_{i=1}^{n}\alpha_i[y_i(w^T\phi(x)+b)-1+\xi_i] 
+    - \sum_{i=1}^{n}\mu_i\xi_i 
+    $$
+
+    $$
+    \frac{\partial \mathcal{L}}{\partial w} = 0 
+    \implies w = \sum_{i \in SV}\alpha_{i}y_{i}\phi(x_{i}) \tag{2}
+    $$
+
+    To derive the kernelized prediction function, substitute (2) into (1):
+
+    $$
+    \begin{aligned}
+    f(x_{new}) &= sign (\langle \sum_{i \in SV}\alpha_{i}y_{i}\phi(x_{i}),\phi(x_{new})\rangle + b) \\
+    f(x_{new}) &= sign ( \sum_{i \in SV}\alpha_{i}y_{i}\langle \phi(x_{i}),\phi(x_{new})\rangle + b) \qquad \text{using the linearity of the dot product}
+    \end{aligned}
+    $$
+
+    The kernel function is an alternative function that directly computes the same value as the dot product of the feature maps:
+
+    $$
+    K(x_i, x_{new}) = \langle \phi(x_{i}),\phi(x_{new})\rangle
+    $$
+
+    Then the prediction function becomes:
+
+    $$
+    f(x_{new}) = sign ( \sum_{i \in SV}\alpha_{i}y_{i}K(x_i,x_{new}) + b)
+    $$
+
+    This allows for the same results as working in the high-dimensional space without explicitly computing $\Phi(x)$ for any point.
+
+b.  
+
+    i.  The feature map $\phi(u)$ for a polynomial kernel contains all monomials formed by the elements of $u$ up to and including the degree $d$. Since the given kernel is non-homogenous with a constant term, the given map includes monomials from degree 0 up to degree 3. The number of unique polynomial terms of degree $k$ in $p$ variables is give by the following combination:
+
+        $$
+        \binom{p+k-1}{k}
+        $$
+
+        The dimensionality of the implicit feature space $\phi(x)$ is the sum of the number of terms for each degree $k=0$ to $3$:
+
+        $$
+        D = \sum_{k=0}^{d} (\text{Number of unique terms of degree } k) = \sum_{k=0}^{d} \binom{p + k - 1}{k} = \binom{p + d}{d}
+        $$
+
+        The given kernel has degree $d=3$, and the input vector $u$ has dimensionality $p$. Therefore:
+
+        $$
+        D = \binom{p + 3}{3} = \frac{(p+3)!}{3! p!} = \frac{(p+3)(p+2)(p+1)}{6}
+        $$
+
+        This term includes $\binom{n + 0 - 1}{0} = \binom{n - 1}{0} = 1$ constant term corresponding to the constant $1^3 = 1$, and $\binom{n + 1 - 1}{1} = \binom{n}{1} = n$ linear terms corresponding to the original features. Additionally, we also have $\binom{n + 2 - 1}{2} = \binom{n+1}{2} = \frac{n(n+1)}{2}$ quadratic terms (like $u_i^2$ and $u_i u_j$) and $\binom{n + 3 - 1}{3} = \binom{n+2}{3} = \frac{n(n+1)(n+2)}{6}$ cubic terms (like $u_i^3, u_i^2 u_j, u_i u_j u_k$).
+
+    ii. For 2-dimensional input $u=[u_1, u_2] \text{ and } v=[v_1, v_2]$, $$
+        u^Tv = u_1v_1 + u_2v_2
+        $$Therefore:
+
+        $$
+        \begin{aligned}
+        K(u, v) &= (1 + u_1v_1 + u_2v_2)^3 \\
+        &= 1^3 + 3(u_1v_1 + u_2v_2) + 3(u_1v_1 + u_2v_2)^2 + (u_1v_1 + u_2v_2)^3 \\
+        &= 1 + (3u_1v_1 + 3u_2v_2) + (3u_1^2v_1^2 + 6u_1v_1u_2v_2 + 3u_2^2v_2^2) \\ &\quad + (u_1^3v_1^3 + 3u_1^2v_1^2u_2v_2 + 3u_1v_1u_2^2v_2^2 + u_2^3v_2^3)
+        \end{aligned}
+        $$
+
+        Consider the mixed cubic term $3u_1^2v_1^2u_2v_2 = 3u_1^2u_2v_1^2v_2$ in the above expansion. The $k^{th}$ component of the feature map corresponding to this term is:
+
+        $$
+        \phi_k(u) = \sqrt{3}u_1^2u_2 \quad \implies  \phi_k(u)\phi_k(v) = 3u_1^2u_2v_1^2v_2
+        $$
+
+c.  Since the expansion of the exponential function ($e^{-x}$) is a Taylor series with infinite terms, the implicit feature map $\phi(x)$ of the RBF Kernel $K(x_i,x_j)=exp(-\gamma ||x_i-x_j|| ^2)$ has infinite dimensionality. With higher values of $\gamma$, the kernel can model very complex non-linear relationships between variables with a very low bias. However, this means that the kernel is also prone to fitting to noise or outliers than genuine patterns in the input space, making it susceptible to overfitting (high variance).
+
+#### Question 3: Support Vector Regression
+
+a.  In this case, an $\epsilon$-insensitive loss with different weights for underestimation and overstimation can be used. Since $y-f(x)>\epsilon$ for underestimation, and $y-f(x)<-\epsilon$ for overestimation:
+
+    $$
+    L_{\epsilon}(y, f(x)) = \lambda_{under}\text{ max}\{0, y-f(x)-\epsilon\} 
+    + \lambda_{over}\text{ max}\{0, f(x)-y-\epsilon\} \quad \text{s.t} \quad \lambda_{over} > \lambda_{under}
+    $$
+
+    ```{r, fig.width=4.5, fig.height=2.5}
+    epsilon <- 1
+    lambda_under <-  1
+    lambda_over <-  3
+
+    # Range of residuals (r = y - f(x))
+    r <- seq(-5, 5, length.out = 400)
+
+    loss <- numeric(length(r))
+    # underestimation (r > eps)
+    loss[r > epsilon] <- lambda_under * (r[r > epsilon] - epsilon)
+    # overestimation (r < -eps)
+    loss[r < -epsilon] <- lambda_over * (-r[r < -epsilon] - epsilon)
+
+    # Plot
+    data <- data.frame(r = r, loss = loss)
+    ggplot(data, aes(x = r, y = loss)) +
+      geom_line() +
+      labs(x = "y - f(x)", y = expression(L[epsilon](y, f(x))), 
+           title = "Asymmetric epsilon-insensitive Loss Function") +
+      geom_vline(xintercept = c(-1,1), linetype = "dashed", color = "navy") +
+      annotate("text", x = -3, y = 12, label = "Overestimation", size = 3) +
+      annotate("text", x = 3, y = 12, label = "Underestimation", size = 3) +
+      theme_minimal()
+    ```
+
+b.  Let the form of $f$ be $f(x) = \langle w, \phi(x) \rangle + b$ (where $w\in \mathbb{R}^p \text{ and } b \in \mathbb{R}$), then the SVM regression is:
+
+    $$
+    \begin{aligned}
+    Minimize &\quad  \varepsilon (w, b, \xi, \xi^*) 
+    = \frac{1}{2}\langle w,w \rangle 
+    + C_{under}\sum_{i=1}^n\xi_i 
+    + C_{over}\sum_{i=1}^n\xi_i^* \\
+    &s.t \quad y_i - \langle w, \phi(x) \rangle - b \leq \epsilon + \xi_i, \quad i=1,...,n \\
+    &\qquad \space  \langle w, \phi(x) \rangle + b -y_i\leq \epsilon + \xi_i^*, \quad i=1,...,n \\
+    &\qquad \space \xi_i \geq 0, \quad \xi_i^* \geq 0, \quad i=1,...,n \\
+    & \qquad C_{under}>0, \quad C_{over}>0, \quad C_{over} > C_{under}
+    \end{aligned}
+    $$
+
+    $\xi_i$ is the slack variable for underestimation ($y_i - f(x_i) >\epsilon$), while $\xi_i^*$ is the slack variable for overestimation ($f(x_i) -y_i >\epsilon$). Moreover, $C_{under}>0$ and $C_{over}>0$ are penalty variables under asymmetric $\epsilon$-insensitive loss; $C_{over} > C_{under}$ ensures that overestimation is penalized more than underestimation.
+
+c.  The prediction function for the asymmetric $\epsilon$-insensitive loss is:
+
+    $$
+    \begin{aligned}
+    f&(x_{new}) = \sum_{i=1}^n (\alpha_i - \alpha_i^*)K(x_i, x_{new}) + b \\
+    &s.t \quad 0 \leq\alpha_i \leq C_{under}, \quad 0 \leq\alpha_i^* \leq C_{over}
+    \end{aligned}
+    $$
+
+### Part B: Connecting Learning Paradigms
+
+#### Question 1: The Grand Unified View (Loss + Penalty)
+
+a.  
+
+| Method | Loss $L(y, f(x))$ | Regularizer $J(f)$ | Function Class $\mathcal{H}$ |
+|------------------|-------------------|------------------|------------------|
+| Ridge Regression | $(y-f(x))^2$ | $||\beta||_2^2$ | Linear |
+| Lasso | $(y-f(x))^2$ | $||\beta||_1$ | Linear |
+| SVM (Primal) | Hinge loss: $\text{max}(0, 1-yf(x))$ | $\frac{1}{2}||w||_2^2$ | Linear or Kernelized |
+| Logistic Regression | $-[y.log(p(x)) + (1-y).log(1-p(x))]$ | None | Linear |
+
+b.  The loss functions used in SVM classification focus on whether the predicted points are on the correct side of the decision boundary and beyond a margin width of 1, whereas the cross-entropy loss for logistic regression works with posterior class probabilities.
+
+    For hinge loss in Support Vector Classification, a point correctly classified with a large margin ($yf(x)>1$) incurs zero loss, while misclassified points are penalized increasingly as they move further away from the decision boundary. In contrast, logistic regression's loss penalizes all points continuously. For a point belonging to class 1, smaller predicted class probabilities are penalized more heavily. Conversely, points belonging to class 0 incur greater penalty with larger predicted class probabilities.
+
+    As a result, Logistic Regression is more sensitive to outliers since extreme points always affect the loss, while SVM ignores correctly classified points and primarily focuses on misclassifications and margin violations.
+
+#### Question 2: The Dimensionality Curse and Blessing
+
+a.  As the number of features ($p$) grows, the data becomes sparse in the high dimensional space. The squared Euclidean distance term $||u-v||^2$ in the RBF kernel loses discriminative power as all pairwise distances increase and become nearly identical, making the nearest and furthest neighbors more difficult to distinguish. Consequently, the RBF kernel matrix approaches the identity matrix, resulting in numerical instability and loss of expressive power.
+b.  The distance concentration phenomenon makes all off-diagonal entries of the kernel matrix $K(u,v)$ converge to either 1 or 0. If $\gamma$ is too small, $K_{ij} \approx 1$ for all pairs, leading to a constant kernel matrix and underfitting (high bias), as the model can't distinguish points. If $\gamma$ is too large, $K_{ij} \approx 0$, making the matrix nearly the identity matrix, causing overfitting (high variance) by isolating every data point. This means that in high dimensions, a meaningful pattern can only be learned within a very narrow range of $\gamma$ values, making successful application critically dependent on precise tuning.
+c.  SVMs often perform well in practice since data becomes sparse in high dimensions. With many features, there exist separating hyperplanes that can perfectly split the classes even with simple linear models. Thus, a linear SVM can often achieve good performance without relying on a complex nonlinear kernel.
+
+## 2. Applied Regression Learning
+
+### Part A. Data Exploration and Preparation
+
+#### 1. Data Understanding
+
+**a. Missing Values and Summary Statistics**
+
+```{r}
+# Load Data
+library(BMS)
+data(datafls)
+
+# Convert categorical variables to factors
+cat_vars <- names(datafls)[sapply(datafls, function(x)
+  length(unique(na.omit(x))) <= 10 && is.integer(x))]
+datafls[cat_vars] <- lapply(datafls[cat_vars], factor)
+
+# # Convert categorical variables to ordered factors
+# cat_vars <- names(datafls)[sapply(datafls, function(x)
+#   length(unique(na.omit(x))) <= 10 && is.integer(x))]
+# datafls[cat_vars] <- lapply(datafls[cat_vars], ordered)
+
+# Create Feature and Response Dataframes
+X <- datafls[, -which(names(datafls) == "y")]
+y <- datafls$y
+
+# Shape of data
+dim(datafls)
+```
+
+The data has 72 rows of 41 feature variables.
+
+```{r}
+# Check for Missing values
+any(complete.cases(datafls) == FALSE)
+```
+
+There are no missing values in datafls.
+
+```{r}
+# Summary Statistics for Numeric variables
+for (var in cat_vars) {
+  cat("--------------------------\n")
+  cat("Variable:", var, "\n")
+  cat("Categorical variable\n")
+  
+  x <- datafls[[var]]
+  print(table(x))}
+
+# Summary Statistics for Numeric variables
+num_vars <- names(datafls)[sapply(datafls, is.numeric)]
+numeric_summary <- list() 
+
+for (var in num_vars) {
+  x <- datafls[[var]]
+  stats <- data.frame(Min = min(x), Q1  = quantile(x, 0.25), Median = median(x),
+      Mean = mean(x), Q3 = quantile(x, 0.75), Max = max(x), SD = sd(x))
+  numeric_summary[[var]] <- stats }
+
+numeric_df <- do.call(rbind, numeric_summary)
+numeric_df<- round(numeric_df, 2)
+numeric_df
+```
+
+The dataset contains a mix of continuous, categorical, and proportion-based variables. The response variable `y` represents economic growth from 1960-1992. Most feature variables are continuous measurements such as geographic characteristics (`Abslat, Area`), economic indicators (`GDP60, LabForce`), and demographic or political metrics (`LifeExp, PolRights, CivlLib`). The data also includes eight categorical features capturing colonization, regional, or political classifications; seven of which are binary indicators (`Spanish, French, Brit, WarDummy, LatAmerica, SubSahara, OutwarOr`) and one ordinal variable with six levels (`EcoOrg`). Additionally, several variables are ratios or percentages bounded between 0 and 1, reflecting industry or population shares, enrollment rates, or religious composition (e.g `PrScEnroll, Buddha, Catholic, Confucian, Hindu, Jewish, Muslim, EthnoL, Mining, RuleofLaw, PublEdupct`).
+
+Source: <https://www.rdocumentation.org/packages/BMS/versions/0.3.5/topics/datafls>
+
+**b. Visualizations showing relationships between Predictors and Response**
+
+```{r, fig.width=5.5, fig.height=4.5}
+
+# Calculate Correlations
+num_data <- datafls[, sapply(datafls, is.numeric)]
+cor_mat <- cor(num_data)
+cor_long <- melt(cor_mat)
+
+# Correlation heatmap for Numeric Variables
+ggplot(cor_long, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile(color = "white") +
+  scale_fill_gradient2(low = "navy", high = "maroon", mid = "white",
+                       midpoint = 0, limit = c(-1, 1),
+                       name = "Correlation") +
+  theme_minimal(base_size = 10) +
+    theme(axis.text.x = element_text(angle = 90, hjust = 1),
+          axis.title.x = element_blank(),
+          axis.title.y = element_blank()) +
+  labs(title = "Correlation Heatmap of Numeric Variables")
+
+# Displaying the highest correlations 
+cor_high <- as.data.frame(as.table(cor_mat)) |>
+  filter(Var1 != Var2) |>
+  filter(abs(Freq) > 0.7) |>
+  filter(as.character(Var1) < as.character(Var2)) |>
+  arrange(desc(abs(Freq)))
+cor_high
+
+# Correlations between pairs of y and feature variables 
+cor_mat[1,-1]
+```
+
+Most features in the dataset have strong correlations with each other. `Civil Liberties` and `Political Rights` are almost perfectly correlated. Moreover, `GDP` is strongly positively correlated with `Life Expectancy`, `Primary School Enrollment`, and `Higher Education Enrollment`, and strongly negatively correlated with `Civil Liberties`, `Political Rights` (noting that higher scores indicate worse civil liberties and political rights), and `Population Growth`. Similarly, `Life Expectancy` is highly positively correlated with `GDP`, and `Primary School Enrollment`, and negatively correlated with `Population Growth`, `Civil Liberty` and `Political Right` scores.
+
+In contrast, the response variable `y` has generally weak correlations with most features. Only a few variables (`Years Open`, `Life Expectancy`, `Rule of Law`, `Equipment Investment`, `Confucian population share`, and `Primary Exports`) show moderate relationships with growth. Overall, predictors form clear correlation clusters, but none are strongly related to the outcome, suggesting a complex and multi-factor structure behind economic growth.
+
+```{r, fig.height=6}
+plot_list <- list()
+
+for (var in cat_vars) {
+  p <- ggplot(datafls, aes(x = as.factor(.data[[var]]), y = y,
+                           fill = as.factor(.data[[var]]))) +
+    geom_boxplot(alpha = 0.7) +
+    labs(title = var, x = var, y = "y") +
+    theme_minimal(base_size = 10) +               
+    theme(legend.position = "none", 
+          plot.title = element_text(size = 9),
+          axis.text.x = element_text(size = 6), 
+          axis.text.y = element_text(size = 6),
+          axis.title.x = element_text(size = 7),
+          axis.title.y = element_text(size = 7))
+  plot_list[[var]] <- p}
+
+wrap_plots(plot_list, ncol = 2, nrow = 4)
+```
+
+`SubSahara` is the only binary indicator that exhibits clear separability between the two classes, with lower median economic growth for Class 1 (Sub-Saharan countries). The remaining features have overlapping interquantile ranges, with lower median for Class 1 in `Spanish`, `French`, `WarDummy`, and `LatAmerica`. In contrast, the ordinal variable `EcoOrg` (degree of capitalism) shows a stronger pattern: median economic growth generally increases across higher levels of economic organization, suggesting a positive relationship between capitalism and growth.
+
+**c. Outlier Detection**
+
+```{r}
+outlier_summary <- lapply(num_vars, function(var) {
+  x <- datafls[[var]]
+  q1 <- quantile(x, 0.25)
+  q3 <- quantile(x, 0.75)
+  iqr <- q3 - q1
+  lower <- q1 - 1.5 * iqr
+  upper <- q3 + 1.5 * iqr
+  outliers <- sum(x < lower | x > upper, na.rm = TRUE)
+  ratio <- outliers / nrow(datafls)
+  data.frame(Variable = var, Outliers = outliers, Outlier_Ratio = round(ratio, 2),
+             Lower_Bound = round(lower, 2), Upper_Bound = round(upper, 2))})
+
+outlier_df <- bind_rows(outlier_summary) |> filter(Outliers > 0) |>
+  arrange(desc(Outliers))
+rownames(outlier_df) <- NULL
+outlier_df
+```
+
+Several variables (particularly `English`, `Buddha`, and `Muslim`) have a relatively high proportion of outliers (up to around 21%). However, these extremes are expected since the variables represent geographic, political, cultural and industrial characteristics of countries that may be vastly different from one another.
+
+#### 2. Feature Engineering
+
+**a. Create relevant interaction terms or polynomial features**
+
+Two squared terms were created for `LifeExp` and `RuleofLaw`, reflecting the possibility of diminishing returns in Life Expectancy and nonlinear (potentially exponential) effects in institutional quality. A few interaction terms were also included to capture joint effects between variables that are not strongly correlated individually but are theoretically meaningful when considered together.
+
+```{r}
+X <- X |> mutate(LifeExp_2 = LifeExp * LifeExp, 
+                 RuleofLaw_2 = RuleofLaw * RuleofLaw, 
+                 YrsOpen_BlMktPm = YrsOpen * BlMktPm, 
+                 HighEnroll_LabForce = HighEnroll * LabForce, 
+                 Popg_PublEdupct = Popg * PublEdupct, 
+                 LifeExp_RuleofLaw = LifeExp * RuleofLaw)
+```
+
+**b. Standardize features for SVR**
+
+The kernels and margin penalties in SVR depend on Euclidean distance, therefore, it is important to standardize features to avoid large-scale variables dominating the optimization.
+
+```{r}
+# Identify numeric and factor variables
+num_vars    <- names(X)[sapply(X, is.numeric)]
+factor_vars <- names(X)[sapply(X, is.factor)]
+
+# Convert factors to dummy variables
+X_dummies <- model.matrix(~ . - 1, data = X[factor_vars])[,-1]
+
+# Combine numeric + dummy variables
+X_scaled <- cbind(X[num_vars], X_dummies)
+
+# Scale only numeric columns inside X_scaled
+X_scaled[num_vars] <- scale(X_scaled[num_vars])
+```
+
+**c. Split data into training (70%), validation (15%), and test (15%) sets**
+
+```{r}
+set.seed(747)
+
+# Create training data
+train_idx <- createDataPartition(y, p = 0.70, list = FALSE)
+X_train <- X[train_idx, ]
+X_scaled_train <- X_scaled[train_idx, ]
+y_train <- y[train_idx]
+
+# Separate remaining data
+X_temp  <- X[-train_idx, ]
+X_scaled_temp <- X_scaled[-train_idx, ]
+y_temp  <- y[-train_idx]
+
+# Split remaining data into validation and test sets
+val_idx <- createDataPartition(y_temp, p = 0.50, list = FALSE)
+
+# Create validation and test data
+X_val <- X_temp[val_idx, ]
+X_scaled_val <- X_scaled_temp[val_idx, ]
+y_val <- y_temp[val_idx]
+
+X_test <- X_temp[-val_idx, ]
+X_scaled_test <- X_scaled_temp[-val_idx, ]
+y_test <- y_temp[-val_idx]
+```
+
+#### 3. Baseline Models
+
+```{r}
+# Removing engineered variables in the baseline models
+engineered_vars <- c("LifeExp_2", "RuleofLaw_2", 
+                     "YrsOpen_BlMktPm", "HighEnroll_LabForce",
+                     "Popg_PublEdupct", "LifeExp_RuleofLaw")
+
+X_train_base <- X_train[ , !(names(X_train) %in% engineered_vars)]
+X_val_base <- X_val[ , !(names(X_val) %in% engineered_vars)]
+
+# Create dataframe for train set
+train_df_base <- data.frame(y = y_train, X_train_base)
+
+# Create dataframe for validation set
+val_df_base <- data.frame(y = y_val, X_val_base)
+```
+
+**a. Linear Regression**
+
+```{r}
+lm_base <- lm(y ~.,  data = train_df_base)
+summary(lm_base)
+vif(lm_base)
+```
+
+```{r}
+train_pred_lm <- predict(lm_base, newdata = train_df_base)
+
+# Performance Metrics
+lm_train_rmse <- rmse_vec(train_df_base$y, train_pred_lm)
+lm_train_mae  <- mae_vec(train_df_base$y, train_pred_lm)
+lm_train_r2   <- rsq_vec(train_df_base$y, train_pred_lm)
+
+# Results Table
+lm_performance_table <- data.frame(Model = c("Linear Regression"),
+                                   RMSE  = c(lm_train_rmse),
+                                   MAE   = c(lm_train_mae),
+                                   R2    = c(lm_train_r2))
+lm_performance_table
+```
+
+The near-zero p-value for the overall regression indicates that at least one predictor is statistically significant at the 95% confidence level. However, the $R^2$ value is extremely high (99.64%), suggesting that almost all of the variation the training data is explained by the model. In addition, only a subset of variables (`Brit`, `Area`, `LifeExp`, `GDP60`, `EcoOrg`, `Buddha`, `Catholic`, `Confucian`, `Hindu`, `Muslim`, `LabForce`, `English`, `NequipInv`, `EquipInv`) have a statistically significant effect on the response variable. Numerous variables exhibit substantial multicollinearity (GVIF\>5), with CivlLib having extreme multicollinearity (GVIF\>10). Moreover, the extremely low RMSE and MAE values indicate that the model is overfitting. Consequently, predictive performance on the validation/test data may be poor.
+
+**b. Single Decision Tree**
+
+```{r}
+tree_base <- rpart(y ~ ., data = train_df_base, 
+                   method = "anova", 
+                   control = rpart.control(cp = 0))
+rpart.plot(tree_base)
+```
+
+```{r}
+train_pred_tree <- predict(tree_base, newdata = train_df_base)
+
+# Performance Metrics
+tree_train_rmse <- rmse_vec(train_df_base$y, train_pred_tree)
+tree_train_mae  <- mae_vec(train_df_base$y, train_pred_tree)
+tree_train_r2   <- rsq_vec(train_df_base$y, train_pred_tree)
+
+# Results Table
+tree_performance_table <- data.frame(Model = c("Decision Tree"),
+                                     RMSE  = c(tree_train_rmse),
+                                     MAE   = c(tree_train_mae),
+                                     R2    = c(tree_train_r2))
+tree_performance_table
+```
+
+The singular regression tree identifies Life Expectancy as the strongest predictor of economic growth; countries with `LifeExp` below 47 show almost no growth, while those above this threshold experience substantially higher levels. For countries with higher Life Expectancy, Ethnolinguistic Diversity (`EthnoL`) further separates growth outcomes, with more diverse countries showing higher growth. A final split on stdBMP suggests higher black-market volatility is associated with higher economic growth.
+
+Similar to the linear regression, the RMSE and MAE values for the tree are extremely small, indicating overfitting, despite a lower $R^2$ value. Overall, the tree aligns with the linear regression findings: only a small subset of features contributes to explaining economic growth.
+
+**c. Performance on Validation set**
+
+```{r}
+# Predictions on validation set
+val_pred_lm <- predict(lm_base, newdata = val_df_base)
+val_pred_tree <- predict(tree_base, newdata = val_df_base)
+
+# Performance Metrics
+lm_val_rmse <- rmse_vec(val_df_base$y, val_pred_lm)
+lm_val_mae  <- mae_vec(val_df_base$y, val_pred_lm)
+lm_val_r2   <- rsq_vec(val_df_base$y, val_pred_lm)
+
+tree_val_rmse <- rmse_vec(val_df_base$y, val_pred_tree)
+tree_val_mae  <- mae_vec(val_df_base$y, val_pred_tree)
+tree_val_r2   <- rsq_vec(val_df_base$y, val_pred_tree)
+
+# Results Table
+performance_table <- data.frame(Model = c("Linear Regression", "Decision Tree"),
+                                RMSE = c(lm_val_rmse, tree_val_rmse),
+                                MAE  = c(lm_val_mae, tree_val_mae),
+                                R2   = c(lm_val_r2, tree_val_r2))
+performance_table
+```
+
+The decision tree has lower values of RMSE and MAE, but lower $R^2$. This suggests that the tree fits point-wise predictions more closely while explaining less overall variance. For both models, validation RMSE and MAE are higher than the training values while validation $R^2$ are lower. This solidifies the finding that both models fail to generalize well.
+
+### Part B. Support Vector Regression
+
+#### 1. Model Training
+
+**a. Train SVR models with linear, polynomial, and RBF kernels**
+
+```{r}
+# SVR with Linear Kernel 
+svr_linear <- svm(X_scaled_train, y_train, kernel = "linear")
+
+# RMSE on Training Set
+preds_linear <- predict(svr_linear, X_scaled_train)
+linear_RMSE <- rmse_vec(y_train, preds_linear)
+cat(paste("Training RMSE for Linear SVR: ", round(linear_RMSE, 4)))
+```
+
+```{r}
+# SVR with Polynomial Kernel 
+svr_poly <- svm(X_scaled_train, y_train, kernel = "polynomial")
+
+# RMSE on Training Set
+preds_poly <- predict(svr_poly, X_scaled_train)
+poly_RMSE <- rmse_vec(y_train, preds_poly)
+cat(paste("Training RMSE for Polynomial SVR: ", round(poly_RMSE, 4)))
+```
+
+```{r}
+# SVR with RBF Kernel 
+svr_rbf <- svm(X_scaled_train, y_train, kernel = "radial")
+
+# RMSE on Training Set
+preds_rbf <- predict(svr_rbf, X_scaled_train)
+rbf_RMSE <- rmse_vec(y_train, preds_rbf)
+cat(paste("Training RMSE for RBF SVR: ", round(rbf_RMSE, 4)))
+```
+
+**b. Use cross-validation to tune hyperparameters (C,** $\boldsymbol{\epsilon}$**, kernel parameters)**
+
+```{r}
+# Define grids for CV
+C_grid <- c(0.1, 1, 10, 100)
+eps_grid <- c(0.001, 0.01, 0.1, 0.25)
+gamma_grid <- c(0.001, 0.01, 0.1, 1)
+degree_grid <- c(2, 3, 4, 5)
+
+# CV for Linear SVR
+results_linear <- expand.grid(C = C_grid, eps = eps_grid)
+results_linear$RMSE <- NA
+
+for (i in 1:nrow(results_linear)) {
+  model <- svm(X_scaled_train, y_train,
+               kernel = "linear",
+               cost = results_linear$C[i],
+               epsilon = results_linear$eps[i])
+  
+  preds <- predict(model, X_scaled_val)
+  results_linear$RMSE[i] <- rmse_vec(preds, y_val)}
+
+# CV for Polynomial SVR
+results_poly <- expand.grid(C = C_grid, eps = eps_grid, degree = degree_grid)
+results_poly$RMSE <- NA
+
+for (i in 1:nrow(results_poly)) {
+  model <- svm(X_scaled_train, y_train,
+               kernel = "polynomial",
+               cost = results_poly$C[i],
+               epsilon = results_poly$eps[i],
+               degree = results_poly$degree[i])
+  
+  preds <- predict(model, X_scaled_val)
+  results_poly$RMSE[i] <- rmse_vec(preds, y_val)}
+
+# CV for RBF SVR
+results_rbf <- expand.grid(C = C_grid, eps = eps_grid, gamma = gamma_grid)
+results_rbf$RMSE <- NA
+
+for (i in 1:nrow(results_rbf)) {
+  model <- svm(X_scaled_train, y_train,
+               kernel = "radial",
+               cost = results_rbf$C[i],
+               epsilon = results_rbf$eps[i],
+               gamma = results_rbf$gamma[i])
+  
+  preds <- predict(model, X_scaled_val)
+  results_rbf$RMSE[i] <- rmse_vec(preds, y_val)}
+```
+
+**c. Plot validation performance vs. hyperparameter values**
+
+```{r}
+# Identify best parameters
+best_idx <- which.min(results_linear$RMSE)
+best_linear <- results_linear[best_idx, ]
+
+best_label <- paste0("Lowest RMSE at: epsilon = ", best_linear$eps, 
+                     ", C = ", best_linear$C,
+                     " (RMSE = ", round(best_linear$RMSE, 4), ")")
+
+ggplot(results_linear, aes(x = C, y = RMSE, color = as.factor(eps))) +
+  geom_line() + geom_point() +
+  scale_x_log10() +
+  labs(title = "Linear SVR: Validation RMSE",
+       subtitle = best_label,
+       color = "Epsilon") +
+  theme_minimal()
+```
+
+Validation RMSE increases as $C$ grows, indicating that a more rigid (high-penalty) linear SVR overfits and generalizes poorly. Models with larger $\epsilon$ perform best and remain stable across values of $C$, showing that a wider $\epsilon$-tube reduces sensitivity to noise. Overall, small $C$ and larger $\epsilon$ yield the lowest validation error for the linear kernel.
+
+```{r}
+best_idx_poly <- which.min(results_poly$RMSE)
+best_poly <- results_poly[best_idx_poly, ]
+
+best_label_poly <- paste0("Lowest RMSE at: epsilon = ", best_poly$eps,
+                          ", degree = ", best_poly$degree,
+                          ", C = ", best_poly$C,
+                          " (RMSE = ", round(best_poly$RMSE, 4), ")")
+
+ggplot(results_poly, aes(x = C, y = RMSE, color = as.factor(degree))) +
+  geom_point() + geom_line() +
+  facet_wrap(~ eps, labeller = labeller(eps = function(x) paste("epsilon =", x))) +
+  scale_x_log10() +
+  labs(title = "Polynomial SVR: Validation RMSE",
+       subtitle = best_label_poly,
+       color = "Degree") +
+  theme_minimal()
+```
+
+Polynomial SVR shows consistent improvement as $C$ increases, with all degrees achieving their lowest RMSE at $C = 10 \text{ or } C = 100$. Higher-degree polynomials (4–5) do not meaningfully outperform degree 2, suggesting limited benefit from added nonlinearity. The effect of $\epsilon$ is modest as the polynomial kernel behaves similarly across $\epsilon$ levels, with slightly lower errors for smaller $\epsilon$ values.
+
+```{r}
+best_idx_rbf <- which.min(results_rbf$RMSE)
+best_rbf <- results_rbf[best_idx_rbf, ]
+
+best_label_rbf <- paste0("Lowest RMSE at: epsilon = ", best_rbf$eps,
+                         ", gamma = ", best_rbf$gamma,
+                         ", C = ", best_rbf$C,
+                         " (RMSE = ", round(best_rbf$RMSE, 4), ")")
+
+ggplot(results_rbf, aes(x = C, y = RMSE, color = as.factor(gamma))) +
+  geom_line() + geom_point() +
+  facet_wrap(~ eps, labeller = labeller(eps = function(x) paste("epsilon =", x))) +
+  scale_x_log10() +
+  labs(title = "RBF SVR: Validation RMSE",
+       subtitle = best_label_rbf,
+       color = "Gamma") +
+  theme_minimal()
+```
+
+The RBF SVR generally shows improvement in RMSE as $C$ increases, especially when $\gamma = 0.01$, which consistently yields the lowest RMSE across all $\epsilon$ values. Models with larger $\gamma$ (0.1 to 1) perform poorly, indicating overfitting and reduced generalization. Overall, the model is highly sensitive to the parameter $\gamma$, with relatively smaller values producing the best validation performance.
+
+#### 2. Model Evaluation
+
+**a. Compare test performance of different kernels**
+
+```{r}
+# Linear SVR
+linear_model <- svm(rbind(X_scaled_train, X_scaled_val), 
+                    c(y_train, y_val), 
+                    kernel = "linear", 
+                    cost = best_linear$C,
+                    epsilon = best_linear$eps)
+  
+linear_preds <- predict(linear_model, X_scaled_test)
+linear_rmse <- rmse_vec(y_test, linear_preds)
+linear_mae  <- mae_vec(y_test, linear_preds)
+linear_r2   <- rsq_vec(y_test, linear_preds)
+
+# Polynomial SVR
+poly_model <- svm(rbind(X_scaled_train, X_scaled_val), 
+                  c(y_train, y_val),
+                  kernel = "polynomial",
+                  cost = best_poly$C,
+                  epsilon = best_poly$eps,
+                  degree = best_poly$degree)
+  
+poly_preds <- predict(poly_model, X_scaled_test)
+poly_rmse <- rmse_vec(y_test, poly_preds)
+poly_mae  <- mae_vec(y_test, poly_preds)
+poly_r2   <- rsq_vec(y_test, poly_preds)
+
+# RBF SVR 
+rbf_model <- svm(rbind(X_scaled_train, X_scaled_val),
+                 c(y_train, y_val),
+                 kernel = "radial",
+                 cost = best_rbf$C,
+                 epsilon = best_rbf$eps,
+                 gamma = best_rbf$gamma)
+  
+rbf_preds <- predict(rbf_model, X_scaled_test)
+rbf_rmse <- rmse_vec(y_test, rbf_preds)
+rbf_mae  <- mae_vec(y_test, rbf_preds)
+rbf_r2   <- rsq_vec(y_test, rbf_preds)
+
+# Results Table
+performance_table <- data.frame(
+  Model = c("Linear SVR", "Polynomial SVR", "RBF SVR"),
+  RMSE = c(linear_rmse, poly_rmse, rbf_rmse),
+  MAE  = c(linear_mae, poly_mae, rbf_mae),
+  R2   = c(linear_r2, poly_r2, rbf_r2))
+performance_table
+```
+
+The RBF SVR achieves the best overall predictive accuracy with the lowest RMSE and MAE, followed closely by the linear SVR. The polynomial SVR performs worse across all metrics, confirming that higher-order nonlinear transformations do not generalize well for this dataset.
+
+**b. Analyze residuals and identify patterns**
+
+```{r, fig.width = 12, fig.height = 6}
+# Compute Residuals
+linear_resid <- y_test - linear_preds
+poly_resid <- y_test - poly_preds
+rbf_resid <- y_test - rbf_preds
+
+# Residuals vs fits plots
+residual_plot <- function(preds, resid, title) {
+  df <- data.frame(Fitted = preds, Residuals = resid)
+  
+  ggplot(df, aes(x = Fitted, y = Residuals)) +
+    geom_point() +
+    geom_hline(yintercept = 0, color = "red") +
+    theme_minimal() +
+    labs(title = title, x = "Predicted Values", y = "Residuals")
+}
+
+# Display plots in a grid
+resid_plots <- list(
+  residual_plot(linear_preds, linear_resid, "Linear SVR"),
+  residual_plot(poly_preds,   poly_resid,   "Polynomial SVR"),
+  residual_plot(rbf_preds,    rbf_resid,    "RBF SVR"))
+
+wrap_plots(resid_plots, nrow = 1, ncol = 3)
+```
+
+The small test sample (n = 8) limits the interpretability of residual plots/analysis; nevertheless, that the plots show no strong patterns. The polynomial kernel has noticeably larger and more variable residuals, consistent with its poor test RMSE. The linear and RBF models have tighter residual spreads, with the RBF SVR appearing slightly more stable.
+
+**c. Discuss computational requirements of different kernels**
+
+The linear kernel is the fastest and least computationally expensive, with complexity $O(np)$. The polynomial kernel is more expensive, especially for higher degrees, since kernel evaluations grow rapidly and can lead to overfitting. The RBF kernel is the most accurate but also the most computationally intensive, requiring $O(n^2)$ pairwise distance calculations and has costly hyperparameter tuning.
+
+#### 3. Interpretation
+
+**a. How many support vectors were selected?**
+
+```{r}
+cat(paste("Linear SVR Support Vectors:",length(linear_model$index), "\n"))
+cat(paste("Polynomial SVR Support Vectors:",length(poly_model$index), "\n"))
+cat(paste("RBF SVR Support Vectors:",length(rbf_model$index), "\n"))
+```
+
+**b. What does this tell you about the complexity of the solution?**
+
+With $n=64$ observations (training + validation), all kernels select a large proportion of support vectors, suggesting that the fitted functions are highly complex. The models conform closely to the training data, increasing the risk of overfitting and loss of generalizability.
+
+**c. Discuss challenges in interpreting SVR models**
+
+SVR models are difficult to interpret as kernel methods map the data into a high-dimensional feature space, obscuring the original feature relationships. Unlike linear regression, SVR does not yield any coefficients that indicate how each predictor influences the response. The support vectors themselves also do not convey feature importance in the way tree-based models do. Additionally, SVR relies on Lagrangian optimization, which makes the underlying mechanism mathematically complex and challenging to explain in intuitive terms.
+
+### Part C. Tree-based Regression
+
+#### 1. Single Trees
+
+**a. Train a pruned decision tree using cross-validation**
+
+```{r}
+set.seed(747)
+
+# Use 10-fold cross-validation repeated 3 times to find the best cp
+control_pruning <- trainControl(
+  method = "repeatedcv",
+  number = 10,
+  repeats = 3
+)
+
+# 1.2 Tune the Complexity Parameter (cp)
+pruned_tree_cv <- train(
+  y ~ .,
+  data = train_df,
+  method = "rpart",
+  trControl = control_pruning,
+  # This grid defines the complexity parameters (cp) to test for pruning
+  tuneGrid = data.frame(cp = seq(0.001, 0.05, by = 0.005))
+)
+
+# Extract RMSE vector from pruned tree CV
+rmse_pruned_tree <- pruned_tree_cv$resample$RMSE
+
+# 1.3 Identify Optimal cp
+optimal_cp <- pruned_tree_cv$bestTune$cp
+
+cat("Optimal Complexity Parameter (cp):", optimal_cp, "\n")
+
+# 2.2 Build the Final Tree with the Optimal cp
+# Grow a full tree on the combined data first 
+val_df <- data.frame(y = y_val, X_val)
+
+full_tree <- rpart(
+  y ~ .,
+  data = rbind(train_df, val_df),
+  control = rpart.control(cp = 0) # Set cp=0 to grow the largest possible tree
+)
+
+# Prune the full tree using the optimal cp found in step 1.3
+tree_pruned <- prune(
+  tree = full_tree,
+  cp = optimal_cp
+)
+```
+
+The 5-fold cross-validated regression tree identifies `LifeExp` as the dominant predictor of economic growth. Although the unpruned tree also explored splits on `EthnoL` and `stdBMP`, cross-validation removed these, leaving a single split at LifeExp = 46.85.
+
+**b. Visualize the tree structure and important splits**
+
+```{r}
+rpart.plot(tree_pruned,
+           type = 2,
+           extra = 1,
+           fallen.leaves = TRUE,
+           box.palette = "Blues",
+           main = "Pruned Regression Tree")
+```
+
+**c. Compute feature importance scores**
+
+```{r}
+data.frame(Importance = round(tree_pruned$variable.importance, 4))
+```
+
+The feature importance scores indicate that Life Expectancy and its engineered terms (`squared LifeExp` and `LifeExp*RuleofLaw`) are the strongest predictors in the tree model. Other variables like Primary School Enrollment (`PrScEnroll`), initial GDP (`GDP60`), and the Sub-Saharan indicator (`SubSahara`) also contribute modestly.
+
+#### 2. Ensemble Methods
+
+**a. Train a Random Forest and Gradient Boosting Machine**
+
+```{r}
+set.seed(747)
+# Random forest model
+rf_model <- randomForest(x = X_train, y = y_train, ntree = 500, 
+                         mtry = 5, nodesize = 1)
+rf_model
+```
+
+```{r}
+# Gradient Boosting Machine
+gbm_model <- gbm(formula = y ~ ., data = train_df,
+                 distribution = "gaussian",
+                 n.trees = 500, n.minobsinnode = 1, 
+                 interaction.depth = 1,
+                 shrinkage = 0.01)
+gbm_model
+```
+
+**b. Tune hyperparameters using validation set performance**
+
+**For Random Forest**
+
+```{r}
+# Hyperparameter grid
+ntree_grid   <- c(100, 250, 500, 1000)
+mtry_grid    <- c(5, 10, 20, 30, 40, 45)
+nodesize_grid <- c(1, 5, 10)
+
+best_model <- NULL
+best_rmse <- Inf
+
+
+# Grid search
+for (nt in ntree_grid) {
+  for (m in mtry_grid) {
+    for (ns in nodesize_grid) {
+      
+      rf_fit <- randomForest(x = X_val, y = y_val, ntree = nt,
+                             mtry = m, nodesize = ns)
+      
+      # Validation RMSE
+      pred_val <- predict(rf_fit, X_val)
+      rmse <- sqrt(mean((pred_val - y_val)^2))
+      
+      # Track best model
+      if (rmse < best_rmse) { 
+        best_rmse <- rmse
+        best_model <- rf_fit
+        best_params <- list(ntree = nt, mtry = m, nodesize = ns)}}}}
+
+
+# Print best parameters
+cat("\nBest Parameters:\n")
+print(best_params)
+cat("Best Validation RMSE:", best_rmse, "\n")
+
+# Fitting best Random Forest model
+best_rf <- randomForest(x = rbind(X_train, X_val), 
+                        y = c(y_train, y_val),
+                       ntree = best_params$ntree,
+                       mtry = best_params$mtry,
+                       nodesize = best_params$nodesize)
+```
+
+**For Gradient Boosting Machine**
+
+```{r}
+# Hyperparameter grid
+ntrees_grid   <- c(100, 250, 500, 1000)
+depth_grid    <- c(1, 2, 3, 4)
+shrink_grid   <- c(0.01, 0.05, 0.1)
+nodesize_grid <- c(1, 5, 10)
+
+best_gbm <- NULL
+best_rmse <- Inf
+
+# Grid search
+for (nt in ntrees_grid) {
+  for (d in depth_grid) {
+    for (lr in shrink_grid) {
+      for (ns in nodesize_grid) {
+        
+        gbm_fit <- gbm(formula = y ~ ., data = train_df,
+          distribution = "gaussian", n.trees = nt,
+          interaction.depth = d, shrinkage = lr,
+          n.minobsinnode = ns)
+        
+        # Validation RMSE
+        preds <- predict(gbm_fit, newdata = X_val, n.trees = nt)
+        rmse  <- sqrt(mean((preds - y_val)^2))
+        
+        # Track best model
+        if (rmse < best_rmse) {
+          best_rmse <- rmse
+          best_gbm  <- gbm_fit
+          best_params_gbm <- list(n.trees = nt, depth = d,
+                                  shrinkage = lr,nodesize = ns)}}}}}
+
+# Output best parameters
+cat("\nBest GBM Parameters:\n")
+print(best_params_gbm)
+cat("Best GBM Validation RMSE:", best_rmse, "\n")
+
+# Fitting best Gradient Boosting Machine
+best_gbm <- gbm(formula = y ~ ., data = rbind(train_df, val_df),
+                distribution = "gaussian",
+                n.trees = best_params_gbm$n.trees,
+                n.minobsinnode = best_params_gbm$nodesize, 
+                interaction.depth = best_params_gbm$depth,
+                shrinkage = best_params_gbm$shrinkage)
+```
+
+**c. Compare out-of-bag error with validation error**
+
+```{r}
+model_rf <- randomForest(x = X_train, y = y_train,
+                         ntree = best_params$ntree,
+                         mtry = best_params$mtry,
+                         nodesize = best_params$nodesize)
+
+# Out-of-bag error
+oob_mse <- model_rf$mse[model_rf$ntree]
+
+# Validation error
+pred_val <- predict(model_rf, X_val)
+val_mse <- mean((pred_val - y_val)^2)
+
+cat("Out-of-Bag Error:", oob_mse, "\n", 
+    "Validation Error:", val_mse, "\n")
+```
+
+The Out-of-Bag and Validation errors are nearly identical, indicating that the Random Forest has minimal overfitting and generalizes well. The close agreement also confirms that the OOB error provides an accurate internal estimate of test performance.
+
+#### 3. Interpretation
+
+**a. Create partial dependence plots for important features**
+
+```{r echo=TRUE}
+# Choose important features
+imp_df <- importance(best_rf) |> as.data.frame() |>
+  rownames_to_column("Feature") |> arrange(desc(IncNodePurity))
+
+# Top 3 important features
+features_to_plot <- imp_df$Feature[1:3]
+plots <- list()
+
+for (i in 1:3) {
+  feature <- features_to_plot[i]
+  plots[[length(plots) + 1]] <- partial(best_rf, pred.var = feature, 
+                                        train = train_df, plot = FALSE) |>
+                                        autoplot() +
+                                        theme_minimal() +
+                                        theme(plot.title = element_text(size = 10),
+                                              axis.title = element_text(size = 8), 
+                                              axis.text  = element_text(size = 8)) +
+                                        ggtitle(paste("RF:", feature))
+  
+  plots[[length(plots) + 1]] <- partial(best_gbm, pred.var = feature, 
+                                        train = train_df, 
+                                        n.trees = best_params_gbm$n.trees, plot = FALSE) |>
+                                        autoplot() +
+                                        theme_minimal() +
+                                        theme(plot.title = element_text(size = 10),
+                                              axis.title = element_text(size = 8), 
+                                              axis.text  = element_text(size = 8)) +
+                                        ggtitle(paste("GBM:", feature))}
+grid.arrange(grobs = plots, ncol = 2)
+```
+
+The partial dependence plots show broadly consistent patterns between the Random Forest and GBM models for the top predictors. `NequipInv` exhibits a strong positive effect on the response, with predictions increasing sharply around its mid-range values. `Buddha` shows a more gradual positive influence, flattening as the proportion increases, suggesting diminishing marginal effects. In contrast, `EthnoL` has a strong negative relationship with the outcome, where even small increases sharply reduce predicted values. While RF curves appear smoother, GBM produces sharper transitions, reflecting its sequential boosting structure and sensitivity to nonlinearities.
+
+**b. Compare feature importance across different tree methods**
+
+```{r}
+# CART importance
+tree_importance <- tree_pruned$variable.importance
+
+tree_imp_df <- data.frame(Importance = round(tree_pruned$variable.importance, 4))
+tree_imp_df
+
+# Random Forest importance
+rf_importance <- importance(best_rf)
+rf_imp_df <- data.frame(Importance = rf_importance[, 1])
+rf_imp_df
+
+# GBM importance
+gbm_imp_df <- summary(best_gbm, plotit = FALSE)[-1]
+colnames(gbm_imp_df) <- c("Importance")
+gbm_imp_df
+```
+
+**c. Discuss the trade-off between interpretability and performance**
+
+Tree-based models show that higher accuracy often comes at the cost of lower interpretability. Simple models like pruned trees provide explicit decision rules and can be visualized easily, but their simplicity often limits predictive performance. Random Forests improve accuracy by averaging over many trees, but the ensemble structure makes them harder to interpret. Gradient Boosting Machines generally achieve the best predictive performance; their sequential boosting process captures complex nonlinearities but also further reduces interpretability.
+
+### Part D. Comprehensive Comparison
+
+#### 1. Performance Metrics
+
+**a. Create a table comparing all methods on test set RMSE, MAE, and R2**
+
+Computing test performance metrics for tree-based methods. SVR metrics were calculated and saved in section 2.B.2.a
+
+```{r}
+# Pruned tree model
+tree_pruned_preds <- predict(tree_pruned, X_test)
+tree_pruned_rmse <- rmse_vec(y_test, tree_pruned_preds)
+tree_pruned_mae  <- mae_vec(y_test, tree_pruned_preds)
+tree_pruned_r2   <- rsq_vec(y_test, tree_pruned_preds)
+
+# Random Forest
+rf_preds <- predict(best_rf, X_test)
+rf_rmse <- rmse_vec(y_test, rf_preds)
+rf_mae  <- mae_vec(y_test, rf_preds)
+rf_r2   <- rsq_vec(y_test, rf_preds)
+
+# Gradient Boosting Machine
+gbm_preds <- predict(best_gbm, X_test)
+gbm_rmse <- rmse_vec(y_test, gbm_preds)
+gbm_mae  <- mae_vec(y_test, gbm_preds)
+gbm_r2   <- rsq_vec(y_test, gbm_preds)
+
+# Results Table
+performance_table <- data.frame(
+  Model = c("Linear SVR", "Polynomial SVR", "RBF SVR", 
+            "Pruned Tree", "Random Forest", "Gradient Boosting"),
+  RMSE = c(linear_rmse, poly_rmse, rbf_rmse, 
+           tree_pruned_rmse, rf_rmse, gbm_rmse),
+  MAE  = c(linear_mae, poly_mae, rbf_mae,
+           tree_pruned_mae, rf_mae, gbm_mae),
+  R2   = c(linear_r2, poly_r2, rbf_r2,
+           tree_pruned_r2, rf_r2, gbm_r2))
+performance_table
+```
+
+Gradient Boosting achieved the strongest overall performance, with the lowest RMSE and MAE and the highest $R^2$, indicating superior predictive accuracy. The RBF SVR also performed well, outperforming both the pruned tree and Random Forest in error metrics, though with a lower $R^2$ than Gradient Boosting and Linear SVR. Linear SVR showed moderate accuracy with a respectable $R^2$, while the Polynomial SVR performed poorly across all metrics. The Pruned Regression Tree and Random Forest yielded reasonable but not outstanding results, suggesting that boosting and kernel methods capture nonlinear structure more effectively for this dataset.
+
+**b. Perform statistical significance testing of performance differences**
+
+**c. Analyze which method works best for different regions of feature space**
+
+#### 2. Practical Considerations
+
+**a. Compare training time and prediction speed**
+
+Linear SVR trains the fastest and has the lowest prediction latency due to its convex optimization and linear kernel. Polynomial SVR and RBF SVR require substantially more training time because kernel evaluations scale poorly with the number of observations. Among tree-based models, the pruned CART tree trains and predicts very quickly, while Random Forest and Gradient Boosting are slower due to the need to train and aggregate many trees. GBM has the slowest training time but still offers acceptable prediction speed once trained.
+
+**b. Discuss robustness to outliers and noise**
+
+Linear SVR and RBF SVR are relatively robust to moderate noise due to the ε-insensitive loss function, which ignores small deviations. Polynomial SVR is more sensitive to outliers because higher-order kernels can overfit noisy fluctuations. Tree-based models differ substantially: pruned CART is highly sensitive to outliers and small perturbations, while Random Forest and Gradient Boosting are more robust due to ensembling—averaging (RF) and boosting residuals (GBM) dampen the influence of noisy observations.
+
+**c. Analyze sensitivity to hyperparameter choices**
+
+SVR models are highly sensitive to hyperparameter choices, especially the cost parameter CCC, kernel width γ\gammaγ (RBF), and polynomial degree. Poor tuning can result in severe underfitting or overfitting. CART trees are also sensitive to tuning—particularly the complexity parameter cpcpcp—but the optimization surface is simpler. Random Forest is relatively stable across a range of mtrymtrymtry, ntreentreentree, and node sizes, whereas GBM is the most sensitive ensemble method: performance depends strongly on learning rate, tree depth, and number of trees, requiring careful tuning to avoid overfitting.
+
+#### 3. Recommendations
+
+**a. Based on your analysis, which method would you recommend for this dataset?**
+
+Gradient Boosting is the recommended method.
+
+**b. Justify your recommendation considering accuracy, interpretability, and computational cost**
+
+Gradient Boosting achieved the lowest RMSE and MAE and the highest R2R\^2R2, indicating superior predictive performance over all other models. Although it is less interpretable than a pruned tree or linear SVR, partial dependence plots and feature importance metrics still provide meaningful insights into model behavior. Training time is higher than simpler models but remains manageable given the dataset size, and prediction speed is fast once the model is built. Overall, it provides the best balance of accuracy and practical usability.
+
+**c. What would be your next steps for improvement?**
+
+Future improvements could include tuning additional GBM hyperparameters (e.g., learning rate, subsampling fraction), experimenting with more advanced gradient boosting implementations such as XGBoost or LightGBM, and incorporating regularization, dimensionality reduction (PCA) or feature engineering to improve generalization. Cross-validation could also be standardized across all models for statistically valid performance comparisons, and model explanations could be enhanced using SHAP values to better understand nonlinear feature effects.

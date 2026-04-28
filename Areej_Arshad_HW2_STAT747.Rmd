@@ -1,0 +1,844 @@
+---
+title: "STAT 747 - Homework 2"
+author: "Areej Arshad"
+date: "2025-10-23"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Exercise 1: High Dimensional Classification
+
+### A. Theoretical Setup
+
+**Question 1**
+
+For LDA with binary classification, i.e $g \in \{0, 1\}$:
+
+$$
+\delta_{0}(x) = x^{T}\Sigma^{-1}\mu_{0} - \frac{1}{2}\mu_{0}^{T}\Sigma^{-1}\mu_{0} + log(\pi_{0}) 
+$$
+
+$$
+\delta_{1}(x) = x^{T}\Sigma^{-1}\mu_{1} - \frac{1}{2}\mu_{1}^{T}\Sigma^{-1}\mu_{1} + log(\pi_{1})
+$$
+
+The Bayes classifier assigns $x$ to the class with the larger $\delta_{g}(x)$. Therefore, the decision boundary occurs where both discriminant functions are equal. Setting $\delta_{0}(x)=\delta_{1}(x)$ and rearranging gives:
+
+$$
+\begin{aligned}
+(x^T\Sigma^{-1}\mu_0 - x^T\Sigma^{-1}\mu_1) 
+- \frac{1}{2}(\mu_0^T\Sigma^{-1}\mu_0 - \mu_1^{T}\Sigma^{-1}\mu_1)
++ (log(\pi_0) - log(\pi_1)) 
+&= 0 \\
+x^T\Sigma^{-1}(\mu_0-\mu_1) 
+- \frac{1}{2}(\mu_0+\mu_1)^T\Sigma^{-1}(\mu_0-\mu_1) 
++ log\left(\frac{\pi_0}{\pi_1}\right)
+&= 0
+\end{aligned}
+$$
+
+Hence, we have the following explicit form for the linear decision boundary:
+
+$$
+\beta_{0} + \beta_{1}^{T}x = 0 \qquad 
+where \quad 
+\beta_{1} = \Sigma^{-1}(\mu_{0}-\mu_{1}), \quad 
+\beta_{0} = log\left(\frac{\pi_0}{\pi_1}\right) - \frac{1}{2}(\mu_{0}+\mu_{1})^{T}\Sigma^{-1}(\mu_{0}-\mu_{1}) 
+\tag{1}
+$$
+
+The decision boundary relates to the Mahalanobis distance, defined between an observation $x$ and the class mean $\mu_g$:
+
+$$
+d_{M}(x,\mu_g) = \sqrt{(x-\mu_g)^{T}\Sigma^{-1}(x-\mu_g)}
+$$
+
+The difference in squared Mahalanobis distances for an observation $x$ from $\mu_0$ and $\mu_1$ is:
+
+$$
+\begin{aligned}
+d_{M}^{2}(x,\mu_{0}) - d_{M}^{2}(x,\mu_{1}) 
+&= (x-\mu_{0})^{T}\Sigma^{-1}(x-\mu_{0}) - (x-\mu_{1})^{T}\Sigma^{-1}(x-\mu_{1}) \\
+&= (x^{T}\Sigma^{-1}x - 2x^{T}\Sigma^{-1}\mu_{0} + \mu_{0}^{T}\Sigma^{-1}\mu_{0}) 
+- (x^{T}\Sigma^{-1}x - 2x^{T}\Sigma^{-1}\mu_{1} + \mu_{1}^{T}\Sigma^{-1}\mu_{1}) \\
+&= (\mu_{0}+\mu_{1})^{T}\Sigma^{-1}(\mu_{0}-\mu_{1}) 
+- 2x^{T}\Sigma^{-1}(\mu_{0}-\mu_{1})
+\end{aligned}
+$$
+
+Comparing this to terms in (1), we get:
+
+$$
+-\frac{1}{2} \left( d_{M}^{2}(x,\mu_{0}) - d_{M}^{2}(x,\mu_{1}) \right) 
+= x^{T}\Sigma^{-1}(\mu_{0}-\mu_{1}) -\frac{1}{2}(\mu_{0}+\mu_{1})^{T}\Sigma^{-1}(\mu_{0}-\mu_{1}) 
+= -log\left(\frac{\pi_{0}}{\pi_{1}}\right) 
+$$
+
+$$
+d_{M}^{2}(x,\mu_{0}) - d_{M}^{2}(x,\mu_{1}) = 2log\left(\frac{\pi_{0}}{\pi_{1}}\right) \tag{2}
+$$
+
+The boundary condition can, therefore, be interpreted as the set of points where the difference in squared Mahalanobis distances to the two class means is offset by twice the log priors ratio. The decision boundary is equally Mahalanobis distant from the class mean if the class log priors are equal. Otherwise, the boundary shifts towards the less probable class.
+
+**Question 2**
+
+For Quadratic Discriminant Analysis, which relaxes the covariance assumption, the discriminant function is of the form:
+
+$$
+\delta_g(x) 
+= -\frac{1}{2}x^T\Sigma_g^{-1}x 
++ \mu_g^T\Sigma_g^{-1}x 
+- \frac{1}{2}\mu_g^T\Sigma_g^{-1}\mu_g
+- \frac{1}{2}log|\Sigma_g| 
++ log(\pi_g)
+$$
+
+For binary classification, i.e g $\in \{0, 1\}$:
+
+$$
+\delta_0(x) 
+= -\frac{1}{2}x^T\Sigma_0^{-1}x 
++ \mu_0^T\Sigma_0^{-1}x 
+- \frac{1}{2}\mu_0^T\Sigma_0^{-1}\mu_0
+- \frac{1}{2}log|\Sigma_0| 
++ log(\pi_0)
+$$
+
+$$
+\delta_1(x) 
+= -\frac{1}{2}x^T\Sigma_1^{-1}x 
++ \mu_1^T\Sigma_1^{-1}x 
+- \frac{1}{2}\mu_1^T\Sigma_1^{-1}\mu_1
+- \frac{1}{2}log|\Sigma_1| 
++ log(\pi_1)
+$$
+
+Again, the decision boundary occurs where both discriminant functions are equal. Setting $\delta_{0}(x)=\delta_{1}(x)$ and rearranging gives:
+
+$$
+- \frac{1}{2}(x^T\Sigma_0^{-1}x - x^T\Sigma_1^{-1}x) 
++ (\mu_0^T\Sigma_0^{-1}x - \mu_1^T\Sigma_1^{-1}x) 
+- \frac{1}{2}(\mu_0^T\Sigma_0^{-1}\mu_0 - \mu_1^T\Sigma_1^{-1}\mu_1)
+- \frac{1}{2}(log|\Sigma_0| - log|\Sigma_1|) 
++ (log(\pi_0) - log(\pi_1)) 
+= 0 
+$$
+
+$$
+\frac{1}{2}x^T(\Sigma_1^{-1} - \Sigma_0^{-1})x
++ (\Sigma_0^{-1}\mu_0 - \Sigma_1^{-1}\mu_1)^{T}x
+- \frac{1}{2}\mu_0^T\Sigma_0^{-1}\mu_0 + \frac{1}{2}\mu_1^T\Sigma_1^{-1}\mu_1
+- \frac{1}{2}log\left(\frac{|\Sigma_0|}{|\Sigma_1|}\right) 
++ log\left(\frac{\pi_0}{\pi_1}\right) 
+= 0
+$$
+
+Hence, we have the following explicit form for the quadratic decision boundary:
+
+$$
+\beta_{0} + \beta_{1}^{T}x + x^{T}\beta_{2}x = 0
+$$
+
+$$
+where \quad  
+\beta_{1} 
+= \Sigma_1^{-1}\mu_0 - \Sigma_0^{-1}\mu_1 
+$$
+
+$$
+\beta_{2}
+= \frac{1}{2}(\Sigma_1^{-1} - \Sigma_0^{-1})
+$$
+
+$$
+\beta_{0} 
+= \frac{1}{2}\mu_1^T\Sigma_1^{-1}\mu_1
+- \frac{1}{2}\mu_0^T\Sigma_0^{-1}\mu_0
+- \frac{1}{2}log\left(\frac{|\Sigma_0|}{|\Sigma_1|}\right) 
++ log\left(\frac{\pi_0}{\pi_1}\right) \tag{3}
+$$
+
+Relating this to the Mahalanobis distance, using the same steps as Question 1:
+
+$$
+\begin{aligned}
+d_{M}^{2}(x,\mu_{0},\Sigma_0) - d_{M}^{2}(x,\mu_{1},\Sigma_1)
+&= (x-\mu_{0})^{T}\Sigma_0^{-1}(x-\mu_{0}) - (x-\mu_{1})^{T}\Sigma^{-1}_1(x-\mu_{1}) \\
+&= (x^{T}\Sigma_0^{-1}x - 2x^{T}\Sigma_0^{-1}\mu_{0} + \mu_{0}^{T}\Sigma_0^{-1}\mu_{0}) 
+- (x^{T}\Sigma_1^{-1}x - 2x^{T}\Sigma_1^{-1}\mu_{1} + \mu_{1}^{T}\Sigma_1^{-1}\mu_{1}) \\
+&= x^T(\Sigma_0^{-1} - \Sigma_1^{-1})x 
+- 2(\Sigma_0^{-1}\mu_0 - \Sigma_1^{-1}\mu_1)^{T}x
++ \mu_{0}^{T}\Sigma_0^{-1}\mu_{0} 
+- \mu_{1}^{T}\Sigma_1^{-1}\mu_{1}  \\
+\end{aligned}
+$$
+
+$$
+\begin{aligned}
+-\frac{1}{2} \left( d_{M}^{2}(x,\mu_{0},\Sigma_0) - d_{M}^{2}(x,\mu_{1},\Sigma_1) \right) 
+&= \frac{1}{2}x^T(\Sigma_1^{-1} - \Sigma_0^{-1})x
++ (\Sigma_0^{-1}\mu_0 - \Sigma_1^{-1}\mu_1)^{T}x
+- \frac{1}{2}\mu_0^T\Sigma_0^{-1}\mu_0 + \frac{1}{2}\mu_1^T\Sigma_1^{-1}\mu_1 \\
+&= \frac{1}{2}log\left(\frac{|\Sigma_0|}{|\Sigma_1|}\right)
+-log\left(\frac{\pi_{0}}{\pi_{1}}\right)
+\end{aligned}
+$$
+
+$$
+d_{M}^{2}(x,\mu_{0},\Sigma_0) - d_{M}^{2}(x,\mu_{1},\Sigma_1) 
+= 2log\left(\frac{\pi_{0}}{\pi_{1}}\right)
+- log\left(\frac{|\Sigma_0|}{|\Sigma_1|}\right)
+\tag{4}
+$$
+
+The QDA boundary condition can, therefore, be interpreted as the set of points where the difference in squared Mahalanobis distances to the two class means is offset by twice the log priors ratio minus the log determinant ratio of the covariance matrices. From a geometric perspective, QDA allows each class to have its own covariance ellipsoid with different shapes or orientations, leading to a curved (quadratic) decision boundary instead of the linear hyperplane in LDA. QDA performs significantly better than LDA when the classes have different covariance structures and sample size per class is large enough to estimate the covariance matrices.
+
+### B. Data Analysis & High-Dimensional Diagnostics
+
+**Question 1**
+
+```{r}
+# Importing Data
+prostrate.cancer <- read.csv("prostate-cancer-1.csv", header = TRUE)
+prostrate.cancer$Y <- as.factor(prostrate.cancer$Y)
+
+# Calculating n, p, and kappa
+n <- nrow(prostrate.cancer[-1])
+p <- ncol(prostrate.cancer[-1])
+k <- n / p
+
+cat(paste("n = ", n, 
+          "\np = ", p, 
+          "\nkappa = ", round(k,4)))
+```
+
+When $\kappa<<1$, i.e the number of features far exceeds the number of observations ($n<<p$), the sample covariance matrix becomes singular (non-invertible). Since the discriminant functions in Gaussian Discriminant Analysis rely on the inverse of the covariance matrix, this singularity makes the functions unstable or impossible to estimate. Consequently, the classifiers break down or have low stability, with decision boundaries that are highly sensitive to small changes in the data.
+
+**Question 2**
+
+```{r}
+# Calculating prior probability of the positive class
+pi.hat <- sum(prostrate.cancer$Y == 1) / n
+
+# Calculating eta 
+eta <- (1 - pi.hat) / pi.hat
+
+cat(paste("Prior for class 1 = ", round(pi.hat, 4), 
+          "\neta = ", round(eta, 4)))
+```
+
+$\hat{\eta}$ is the prior odds of belonging in the negative class (Y=0) relative to the positive class (Y=1), and is a measure of the dataset's class imbalance. In balanced data ($\eta=1$), where $\hat{\pi}=\pi_0=\pi_1$, the threshold aligns with equal Mahalanobis distances from both class means.
+
+When the positive class is rare ($\hat{\pi}<0.5$), $\hat{\eta}$ becomes larger, increasing the $log\left(\frac{\pi_{0}}{\pi_{1}}\right)$ in (2) and (4) above. Consequently, the classifier needs a smaller Mahalanobis distance to the positive mean to label a new observation as positive . Geometrically, the decision boundary shifts towards the minority (positive) class, tightening its region in the feature space.
+
+Similarly, when the negative class is rare, $\hat{\eta}$ becomes smaller and the $log\left(\frac{\pi_{0}}{\pi_{1}}\right)$ term decreases. Therefore, the threshold shifts towards the negative class and the classifier needs a smaller Mahalanobis distance to the negative mean to label an observation as negative.
+
+**Question 3**
+
+```{r message=FALSE, warning=FALSE}
+library(dplyr)
+
+# Splitting feature data into matrices by class
+class.0.matrix <- as.matrix(prostrate.cancer |> filter(Y == 0) |> dplyr::select(-Y))
+class.1.matrix <- as.matrix(prostrate.cancer |> filter(Y == 1) |> dplyr::select(-Y))
+
+# Calculating mean vectors
+mu.0 <- as.vector(colMeans(class.0.matrix))
+mu.1 <- as.vector(colMeans(class.1.matrix))
+
+# Calculating covariance matrices
+cov.0 <- cov(class.0.matrix)
+cov.1 <- cov(class.1.matrix)
+```
+
+**Part 1: L2 norm of the mean vectors**
+
+```{r}
+norm(as.matrix(mu.1 - mu.0), "2")
+```
+
+The class centroids are 2.102 Euclidean units away from each other in the feature space ($||\hat{\mu_1} - \hat{\mu_1}||_2 = 2.102$). This distance should be interpreted relative to the range of values for the features.
+
+```{r}
+# Percentage of absolute feature values under 1
+sum(abs(prostrate.cancer[-1]) < 1) / (n*p)
+
+# Percentage of absolute feature values under 0.5
+sum(abs(prostrate.cancer[-1] < 0.5)) / (n*p)
+
+# Minimum and Maximum observed values
+min(prostrate.cancer[-1])
+max(prostrate.cancer[-1])
+```
+
+From the raw dataset, we observe that out of $n*p=79*500=39,500$ feature values, roughly 97% lie between 1 and -1, and 95% fall within a narrower range of -0.5 and 0.5. The maximum observed value is 10.7. Based on this scale, an L2 norm of 2.1 indicates that the class centroids are separated by two to four times the typical magnitude of the feature values, suggesting moderate to good separability between the two classes.
+
+**Part 2: Frobenius norm of the covariance matrices**
+
+```{r}
+norm(as.matrix(cov.1 - cov.0), "F")
+```
+
+The Frobenius norm between the two class covariance matrices is $||\hat{\Sigma_1} - \hat{\Sigma_1}||_2 = 3.713$. Based on the scale of the data, this suggests a violation of the equal covariance assumption.
+
+**Question 4**
+
+**Part 1**
+
+```{r}
+# Calculating Overall Sample Covariance
+cov.overall <- cov(prostrate.cancer[-1])
+
+# Calculating Pooled Covariance
+n0 <- nrow(class.0.matrix)
+n1 <- nrow(class.1.matrix)
+cov.pooled <- ((n0-1)*cov.0) + ((n1-1)*cov.1) / (n-2)
+```
+
+Both matrices have dimensionsionality $500$, which makes them difficult to visualize. We plot heatmaps to compare:
+
+```{r}
+# Defining color palette
+colfunc <- colorRampPalette(c("lightblue", "white",  "firebrick3"))
+
+# Setting up side-by-side plotting layout
+par(mfrow = c(1, 2))
+
+# Plotting with zlim to cap color scale
+image(1:nrow(cov.overall), 1:ncol(cov.overall), t(cov.overall[nrow(cov.overall):1, ]),
+  col = colfunc(100),
+  zlim = c(0, 1),       # only color values between 0 and 1
+  xlab = "Variables", ylab = "Variables",
+  main = "Overall Sample Covariance Heatmap \n(Clipped at 0-1)",
+  cex.main = 0.85,
+  cex.lab = 0.8,
+  cex.axis = 0.8)
+
+image(1:nrow(cov.pooled), 1:ncol(cov.pooled), t(cov.pooled[nrow(cov.pooled):1, ]),
+  col = colfunc(100),
+  zlim = c(0, 1),       # only color values between 0 and 1
+  xlab = "Variables", ylab = "Variables",
+  main = "Pooled Covariance Heatmap \n(Clipped at 0-1)",
+  cex.main = 0.85,
+  cex.lab = 0.8,
+  cex.axis = 0.8)
+```
+
+Both heatmaps look similar, with most values near zero (light blue) and only a few moderate covariances (white). Some of the higher covariances (\>1) have been removed for a clearer display. The pooled covariance appears to have a slightly broader spread of higher covariances (indicated by red dots), suggesting that pooling (averaging overs both class matrices) preserved some shared variability between the groups while reducing random noise present in the overall sample covariance.
+
+**Part 2**
+
+```{r, fig.width=6, fig.height=4}
+eigen.results <- eigen(cov.pooled)
+eigen.values <- eigen.results$values
+
+# Creating a data frame for plotting
+eigen_df <- data.frame(
+  component = 1:20,
+  eigenvalue = eigen.values[1:20]
+)
+
+library(ggplot2)
+# Screeplot
+ggplot(data = eigen_df, aes(x = component, y = eigenvalue)) +
+  geom_point(size = 1) +
+  geom_line(linewidth = 0.6) +
+  labs(x = "Components", y = "Eigenvalues", 
+       title = "Screeplot for Eigenvalues of the Pooled Covariance matrix") +
+  theme_minimal()
+```
+
+The screeplot has a sharp elbow at the 3rd eigenvalue, suggesting that the first few eigenvalues dominate the total variance of the dataset. The eigen decomposition of the pooled covariance matrix, therefore, indicates that the intrinsic dimensionality of the data is far lower than the original number of gene expression features, which are likely to be highly correlated. Since the dataset is high-dimensional with low-sample size ($n<<p$), dimensionality reduction techniques (like PCA) would be very useful in improving the numerical stability and generalization of subsequent classifiers.
+
+**Question 5**
+
+```{r}
+library(mvnormtest)
+# For the negative class
+mshapiro.test(class.0.matrix)
+
+# For the positive class
+mshapiro.test(class.1.matrix)
+```
+
+The multivariate normality tests for both classes have near-zero p-values, indicating strong evidence against the null hypothesis of multivariate normality. The violation of the normality assumption implies that LDA and QDA classifiers may have unstable or biased decision boundaries, as their theoretical foundations rely on Gaussian class-conditional densities.
+
+**Question 6**
+
+```{r}
+library(gridExtra)
+
+# Creating a list to store the plots
+plots <- list()
+
+# Creating plots for the first 6 features
+for (i in 1:6) {
+  col_name <- names(prostrate.cancer[i+1])
+  plots[[i]] <- ggplot(prostrate.cancer, aes(x = Y, y = .data[[col_name]], fill = Y)) +
+    geom_boxplot() +
+    labs(x = "Class", y = col_name,
+         title = paste("Boxplot for", col_name, "by Class"),
+         fill = "Class") +
+    theme_minimal() +
+    theme(plot.title = element_text(size = 8),
+          axis.title = element_text(size = 8),
+          axis.text = element_text(size = 7),
+          legend.title = element_text(size = 8),
+          legend.text = element_text(size = 7),) 
+}
+
+# Arrange the 6 plots in a 3x2 grid
+grid.arrange(grobs = plots, ncol = 3)
+```
+
+The fifth feature (X211935_at) is the only one depicting some degree of marginal separation, with minimal overlap in the interquartile range between classes. This means that *X211935_at* carries more class specific information, while the other five features have low discriminative power.
+
+**Question 7**
+
+Based on the above analysis, logistic regression would be the best fit among the models considered. The data is extremely high-dimensional, causing the covariance matrix to be non-invertible, and the class structures violate multivariate normality. These findings suggest that Gaussian Discriminant Classifiers like LDA and QDA would not perform well. Moroever, there is substantial feature correlation which violates the strong independence assumption for the Naive Bayes algorithm. Since class means are moderately separated and the covariance structure is broadly similar across classes, a linear decision boundary with far fewer parameters like logistic regression should generalize better than the other models.
+
+## Exercise 2: Extrinsic Empirical Comparisons
+
+```{r message=FALSE}
+library(kernlab)
+data(spam)
+
+# Making sure the response vector is a factor variable
+spam$type <- factor(spam$type, levels = c("nonspam","spam"))
+```
+
+### Question 1
+
+```{r}
+nrow(spam)
+ncol(spam[-58]) 
+table(sapply(spam, class))
+table(sapply(spam, typeof))
+
+str(spam)
+```
+
+The spam dataset has a sample size 4601, with 57 numeric feature variables. The response variable is a binary tag for `spam` and `nonspam`. The `capitalAve`, `capitalLong`, and `capitalLong` variables are counts while the rest of the features appear to be percentages/ratios between 0 and 1.
+
+```{r, fig.width=6, fig.height=4}
+ggplot(spam, aes(x = type, fill = type)) +
+  geom_bar() +
+  labs(x = "Email Type", y = "Count",
+       title = "Class Distribution in the Spam Dataset",
+       fill = "Email Type") +
+  theme_minimal() + 
+  theme(plot.title = element_text(size = 12, face = "bold"),
+        axis.title = element_text(size = 10))
+```
+
+### Question 2
+
+**Part 1: ROC curves with resubstitution**
+
+```{r, fig.width=6, fig.height=4}
+library(ROCR) 
+library(class) 
+library(MASS) 
+library(naivebayes)
+library(e1071)
+
+# Splitting features and response
+X <- spam |> dplyr::select(-type)
+Y <- spam$type
+
+# 1. Linear Discriminant Analysis
+lda.spam <- lda(X, Y)
+prob.lda <- predict(lda.spam)$posterior[, "spam"]
+
+# 2. Quadratic Discriminant Analysis
+qda.spam <- qda(X, Y)
+prob.qda <- prob_qda <- predict(qda.spam)$posterior[, "spam"]
+
+# 3. Naive Bayes
+nb.spam <- naiveBayes(X, Y)
+prob.nb <- predict(nb.spam, newdata = X, type = "raw")[, "spam"]
+
+# 4. 9 Nearest Neighbors
+knn.spam <- knn(train = X, test = X, cl = Y, k = 9, prob = TRUE)
+prob.knn <- ifelse(knn.spam == "spam", attr(knn.spam, "prob"), 1 - attr(knn.spam, "prob"))
+
+# 5. Support Vector Machine (linear kernel)
+svm.spam <- ksvm(as.matrix(X), Y, kernel = "vanilladot", prob.model = TRUE)
+prob.svm <- predict(svm.spam, X, type = "probabilities")[, "spam"]
+
+# Helper function to plot one ROC curve
+plot_roc <- function(pred, truth, col, add = FALSE) {
+  pred_obj <- prediction(pred, truth)
+  perf_obj <- performance(pred_obj, "tpr", "fpr")
+  if (!add) {
+    plot(perf_obj, col = col, lwd = 1,
+         main = "Comparison of ROC Curves (with Resubstitution)")}
+  else {
+    plot(perf_obj, col = col, lwd = 1, add = TRUE)}
+  auc <- performance(pred_obj, "auc")@y.values[[1]]
+  return(auc)
+}
+
+# Plot all five on same axes
+auc.lda <- plot_roc(prob.lda, Y, col = "blue", add = FALSE)
+auc.qda <- plot_roc(prob.qda, Y, col = "red", add = TRUE)
+auc.nb  <- plot_roc(prob.nb,  Y, col = "darkgreen", add = TRUE)
+auc.knn <- plot_roc(prob.knn, Y, col = "purple", add = TRUE)
+auc.svm <- plot_roc(prob.svm, Y, col = "orange", add = TRUE)
+abline(a = 0, b = 1)
+
+legend("bottomright",
+       legend = c(sprintf("LDA (AUC = %.3f)", auc.lda),
+         sprintf("QDA (AUC = %.3f)", auc.qda),
+         sprintf("Naive Bayes (AUC = %.3f)", auc.nb),
+         sprintf("9NN (AUC = %.3f)", auc.knn),
+         sprintf("SVM Linear (AUC = %.3f)", auc.svm)),
+       col = c("blue", "red", "darkgreen", "purple", "orange"),
+       lwd = 1, cex = 0.6)
+```
+
+All the models perform well, with AUC values above 0.88, indicating strong discriminative ability. The Linear SVM achieves the highest AUC of 0.975, suggesting it fits the training data exceptionally well, followed closely by LDA (0.954) and QDA (0.951). These results imply that the linear and quadratic discriminant methods effectively capture the underlying structure of the spam data. The 9NN (AUC = 0.924) also performs well but slightly underfits relative to the top models, while Naive Bayes (AUC = 0.886) shows the weakest performance, likely due to its strong independence assumptions being violated in this dataset. These AUC values reflect optimistic estimates because resubstitution overestimates predictive performance. A more reliable evaluation would require cross-validation to assess generalization.
+
+**Part 2: Stratified holdouts**
+
+The QDA model breaks down since it is very sensitive to high dimensionality and results in a non-invertible covariance matrix. Therefore, we reduce the dimensionality of the data used for QDA through Principal Component Analysis (PCA), retaining the PCs that cumulatively explain 95% of the variation in the data.
+
+```{r include=FALSE}
+library(caret)
+
+# Setting seed for reproducibility 
+set.seed(7472025)
+
+# Proportion of observations in test data 
+epsilon <- 0.66
+
+# Number of replications
+R <- 50   
+
+# Matrix to store test errors for all five models 
+test.err <- matrix(NA, nrow = R, ncol = 5,
+                   dimnames = list(c(1:R), 
+                                   c("LDA", "QDA (PCA)", "NB", 
+                                     "Nine NN", "SVM")))
+
+for (r in 1:R) {
+  # Split the data 
+  train.index <- createDataPartition(Y, p = (1 - epsilon),list = FALSE)
+  X.train <- as.matrix(X[train.index,])
+  Y.train <- Y[train.index]
+  X.test <- as.matrix(X[-train.index,])
+  Y.test <- Y[-train.index]
+  
+  # 1. Linear Discriminant Analysis
+  lda.fit <- lda(X.train, Y.train)
+  pred.lda <- predict(lda.fit, newdata = X.test)$class
+  test.err[r, "LDA"] <- mean(pred.lda != Y.test)
+
+  # 2. QDA with PCA preprocessing
+  pca.fit <- prcomp(X.train, center = TRUE, scale. = TRUE)
+  
+  # Choose number of PCs explaining 95% variance
+  var.explained <- cumsum(pca.fit$sdev^2 / sum(pca.fit$sdev^2))
+  n.pc <- which(var.explained >= 0.95)[1]
+  
+  X.train.pca <- pca.fit$x[, 1:n.pc]
+  X.test.pca <- predict(pca.fit, X.test)[, 1:n.pc]
+  
+  qda.fit <- qda(X.train.pca, Y.train)
+  pred.qda <- predict(qda.fit, newdata = X.test.pca)$class
+  test.err[r, "QDA (PCA)"] <- mean(pred.qda != Y.test)
+
+  # 3. Naive Bayes
+  nb.fit <- naiveBayes(X.train, Y.train)
+  pred.nb <- predict(nb.fit, newdata = X.test, type = "class")
+  test.err[r, "NB"] <- mean(pred.nb != Y.test)
+
+  # 4. 9 Nearest Neighbors
+  pred.knn <- knn(train = X.train, test = X.test, cl = Y.train, k = 9, prob = TRUE)
+  test.err[r, "Nine NN"] <- mean(pred.knn != Y.test)
+
+  # 5. Support Vector Machine (linear kernel)
+  svm.fit <- ksvm(as.matrix(X.train), Y.train, kernel = "vanilladot", prob.model = TRUE)
+  pred.svm <- predict(svm.fit, X.test, type = "response")
+  test.err[r, "SVM"] <- mean(pred.svm != Y.test)
+}
+```
+
+### Question 3
+
+```{r, fig.width=6, fig.height=4}
+library(reshape2)
+
+# Converting the teste errors to a long form for plotting 
+test.err.long <- melt(data.frame(test.err))
+
+ggplot(test.err.long, aes(x = variable, y = value, fill = variable)) +
+  geom_boxplot() +
+  labs(x = "Method", 
+       y = "Test error with Stochastic Holdout",
+       title = "Test Error across 50 Stratified Holdouts") +
+  theme_minimal() +
+  theme(legend.position = "none") 
+```
+
+The boxplot of test errors across 50 stratified holdouts provides a clearer picture of how each model generalizes beyond the training data. The Support Vector Machine (SVM) performs the best, exhibiting the lowest bias (median\~0.075) and variance of test error, indicating strong stability and consistent generalization across different splits. Linear Discriminant Analysis (LDA) performs slightly worse, with a higher median and variance. The QDA algorithm performs worse than LDA and SVM, despite the use of principal components; it has a high variance and median test error around 0.17. Additionally, Naive Bayes (NB) has the highest median error (\~0.30) and a relatively large spread, suggesting both high bias and instability. The 9-Nearest Neighbor (9NN) method shows intermediate performance, with moderate error (\~0.2) and slightly higher variability than LDA and SVM.
+
+The QDA machine breaks down entirely due to the high dimensional nature ($n<<p$) of the dataset; the model cannot work with singular or highly unstable covariance matrices. Even with PCA, it has a moderate bias and high variance, suggesting weak generalization. Naive Bayes represents a high-bias, low-variance model; it is simple and underfits complex data due to the feature independence assumption being violated in the spam dataset. 9NN, being more flexible, has lower bias but higher variance since it fits closely to the training data. LDA maintains moderate bias and low variance due to its linear boundaries, while SVM (especially with a linear kernel) achieves the best trade-off by managing complexity effectively, even in high-dimensional spaces like text data.
+
+## Exercise 3: Theoretical Proofs & Proofs
+
+### Question 1
+
+For a given dataset$$
+\mathcal{D}_{n} = \{(x_{i}, y_{i}) \overset{\text{i.i.d}}{\thicksim} p_{XY}(x,y), \space x_{i} \in \mathcal{X}, \space 
+y_{i} \in \{1,2,...,G\}, \space i = 1,2,...,n\}
+$$
+
+The KNN classification criteria is:
+
+$$
+\hat{f}(x) 
+= \underset{g \in \{1,2,..,G\}}{argmax} 
+\left\{
+\frac{1}{k}\sum_{i=1}^{n} \mathbf{1}(x_i \in \nu_k(x)) \mathbf{1} (Y_i=g)
+\right\} \qquad
+$$
+
+which can be rearranged to the form below. This formulation represents a locally weighted majority vote, where each of the $k$ selected neighbors from a total of $n$ samples contributes an equal vote to determine the predicted class.$$
+\hat{f}(x) 
+= \underset{g \in \{1,2,..,G\}}{argmax} 
+\left\{
+\sum_{i=1}^{n} \left(\frac{1}{k}\right) \mathbf{1}(x_i \in \nu_k(x)) \mathbf{1} (Y_i=g)
+\right\} \qquad
+$$
+
+$$
+\hat{f}(x) =  \underset{g \in \{1,2,..,G\}}{argmax}
+\left\{
+\sum_{i=1}^{n} \omega_i(x) \mathbf{1} (Y_i=g)
+\right\} 
+\qquad where \quad
+\omega_i(x) = \begin{cases} 
+\frac{1}{k} & x_i \in \nu_k(x) \\
+0 & otherwise
+\end{cases}
+$$
+
+The KNN classifier is universally consistent; the misclassification error is bounded by twice the Bayes risk as the number of training samples $(n)$ grows larger.$$
+\underset{n \rightarrow \infty}{lim} R(\hat{f}^{(n)}_{kNN}) = R^* \qquad \text{where k(n)} \rightarrow \infty, \space \frac{k(n)}{n} \rightarrow 0
+$$
+
+The two asymptotic conditions guide the algorithm to balance the bias-variance tradeoff. As $n$ grows, the number of neighbors ($k$) also increases. The algorithm averages over more values, which stabilizes the variance. Simultaneously, the bias decreases as the ratio of neighbors to sample size shrinks, which keeps the local neighborhood small and the algorithm adapts closely to the data. Together, these effects lead to the model's expected loss converging to the optimal Bayes risk.
+
+### Question 2
+
+Principal Component Analysis becomes computationally inefficient for high-dimensional datasets ($n<<p$) due to two expensive operations. The first is computing the $p \times p$ covariance matrix ($S = \frac{1}{n-1} X^TX$). This has time complexity $O(np^2)$, since each of the $p^2$ covariance terms requires $O(n)$ computations. The second step is the eigen-decomposition of the covariance matrix, which has a time complexity of $O(p^3)$. When the number of features $p$ is large (often in the hundreds or thousands) the overall complexity becomes $O(p^3)$, making PCA computationally demanding. Moroever, since $S$ has a maximum possible rank of $n$, it only contains upto $n$ non-zero eigenvalue, making the computation all $p$ eigenvectors largely redundant.
+
+Using the gram matrix is a better option instead, since it has complexity $O(n^3)$. The eigen-vectors for the covariance matrix can be obtained from the eigen-vectors of the gram matrix.
+
+We denote $S = X^TX$ (a $p \times p$ matrix), $G=XX^T$ (an $n \times n$ matrix), $e_g$ as an eigenvector of $G$, and $\lambda_g$ as a scalar eigenvalue of $G$. Then, by definition:
+
+$$
+G e_g = \lambda_g e_g 
+$$
+
+$$
+XX^T e_g = \lambda_g e_g
+$$
+
+Multiply both sides of the equation by $X^T$ and re-arranging gives us the eigen decomposition for $S$:
+
+$$
+X^TXX^T e_g = X^T\lambda_g e_g \implies 
+(X^TX)(X^T e_g) = \lambda_g (X^T e_g) \implies 
+S (X^T e_g) = \lambda_g (X^T e_g)
+$$
+
+Therefore, the eigenvalues for both matrices are the same and the eigenvectors of $S$ can be obtained by multiplying the transpose of the data matrix $X$ with the eigenvectors of the gram matrix ($e_s = X^Te_g$).
+
+### Question 3
+
+We have the data space defined as:$$
+\mathcal{D}_{n} = \{(x_{i}, y_{i}) \overset{\text{i.i.d}}{\thicksim} p_{XY}(x,y), \space x_{i} \in \mathcal{X}, \space 
+y_{i} \in \{+1,-1\}, \space i = 1,2,...,n\}
+$$
+
+Using the Support Vector Classifier, we aim to find the hyperplane ($h(x) = \omega^T x + b = 0$) that separates the two classes by maximizing the margin$\left(\frac{2}{||\omega||}\right)$. For a single training sample $(x_i,y_i)$, the hinge loss is defined as:
+
+$$
+\begin{aligned}
+{l} (y, f(x)) 
+&= max(0, 1 - y_i(h(x))) \\
+&= max(0, 1 - y_i(\omega^Tx +b)) 
+\qquad where \space f(x) = sign(h(x))
+\end{aligned}
+$$
+
+For a linear SVM with a soft margin, the primal problem is:
+
+$$
+\begin{aligned}
+\underset{\omega, b, \xi}{min} \quad &\varepsilon(\omega, \xi) = \frac{1}{2}||\omega||^2 + C \sum_{i=1}^{n}\xi_i \\
+s.t \quad &y_i(\omega^Tx_i + b) \geq 1 - \xi_i, \qquad i = 1,...,n \\
+&\xi_i \geq 0, \qquad i = 1,...,n
+\end{aligned}
+$$
+
+where
+
+-   $\omega$ and $b$ are the weight vector and intercept term defining the separating hyperplane.
+
+-   $\xi_i$ is the slack variable that allows for misclassifications using a soft margin.
+
+-   $C$ is a penalty hyper-parameter that controls the trade-off between margin width and allowed misclassification.
+
+The dual optimization problem is derived by setting up the Lagrangian for the objective function and given constraints:
+
+$$
+\mathcal{L}(\omega,b,\xi,\alpha,\mu) 
+= \frac{1}{2}||\omega||^2 
++ C \sum_{i=1}^{n}\xi_i 
+- \sum_{i=1}^{n}\alpha_i(y_i(\omega^Tx_i + b) - 1 + \xi_i) 
+- \sum_{i=1}^{n}\mu_i\xi_i \quad \qquad
+s.t \quad \alpha_i \geq0, \space \mu_i \geq 0
+$$
+
+To find the minimum of the Lagrangian with respect to the primal variables ($\mathbf{w}, b, \mathbf{\xi}$), we set the partial derivatives to zero.
+
+a\. With respect to $\omega$
+
+$$
+\frac{\partial \mathcal{L}}{\partial \omega} = \omega - \sum_{i=1}^{n} \alpha_i y_i {x}_i = 0 \quad \implies \quad \omega = \sum_{i=1}^{n} \alpha_i y_i {x}_i
+$$
+
+This shows that the optimal weight vector $\omega$ is a linear combination of the training data, weighted by the $\alpha_i$ and the labels $y_i$.
+
+b\. With respect to $b$:
+
+$$
+\frac{\partial \mathcal{L}}{\partial b} = - \sum_{i=1}^{n} \alpha_i y_i = 0 \quad \implies \quad \sum_{i=1}^{n} \alpha_i y_i = 0
+$$
+
+This is the second constraint in the dual problem.
+
+c\. With respect to $\xi_i$:
+
+$$
+\frac{\partial \mathcal{L}}{\partial \xi_i} = C - \alpha_i - \mu_i = 0 \quad \implies \quad \alpha_i + \mu_i = C
+$$
+
+Substitute the results from the partial derivatives back into $\mathcal{L}$ to eliminate $\omega, b, \xi,$ and $\mu$. Using $\omega = \sum_{j=1}^{n} \alpha_j y_j {x}_j$ and $\sum_{i=1}^{n} \alpha_i y_i = 0$:
+
+$$
+\begin{aligned}\frac{1}{2} ||\omega||^2 - \sum_{i=1}^{n} \alpha_i y_i (\omega^T \mathbf{x}_i + b)&= \frac{1}{2} \omega^T \omega - \omega^T \left(\sum_{i=1}^{n} \alpha_i y_i \mathbf{x}_i\right) - b \left(\sum_{i=1}^{n} \alpha_i y_i\right) \\&= \frac{1}{2} \omega^T \omega - \omega^T \omega - b(0) \\&= - \frac{1}{2} ||\omega||^2 \\&= - \frac{1}{2} \left( \sum_{i=1}^{n} \alpha_i y_i \mathbf{x}_i \right)^T \left( \sum_{j=1}^{n} \alpha_j y_j \mathbf{x}_j \right) \\&= - \frac{1}{2} \sum_{i=1}^{n} \sum_{j=1}^{n} \alpha_i \alpha_j y_i y_j (\mathbf{x}_i^T \mathbf{x}_j)\end{aligned}
+$$
+
+The $\xi_i$ terms equate to zero:
+
+$$
+\sum_{i=1}^{n} C \xi_i - \sum_{i=1}^{n} \alpha_i \xi_i - \sum_{i=1}^{n} \mu_i \xi_i \implies \sum_{i=1}^{n} \xi_i \left( C - \alpha_i - \mu_i \right) = 0
+$$
+
+The Dual Optimization Problem is to maximize this result, subject to the constraints derived from the Lagrange multipliers and the gradient conditions. The constraint $\alpha_i + \mu_i = C$ combined with $\alpha_i \ge 0$ and $\gamma_i \ge 0$ implies $0 \le \alpha_i \le C$.
+
+$$
+\begin{aligned}
+max \quad \varepsilon(\mathbf{\alpha}) 
+&=  \sum_{i=1}^{n} \alpha_i 
+- \frac{1}{2} \sum_{i=1}^{n} \sum_{j=1}^{n} \alpha_i \alpha_j y_i y_j (\mathbf{x}_i^T \mathbf{x}_j) \\
+s.t \quad \sum_{i=1}^{n} \alpha_i y_i &= 0, \quad and \quad 0 \leq\alpha_i\leq C \space (i=1,...,n)
+\end{aligned}
+$$
+
+Using the KKT conditions, the $\alpha_i$ values quantify the influence of the corresponding training points on the placement and orientation of the decision boundary.
+
+$$
+\sum_{i=1}^{n} \alpha_i y_i = 0 
+\quad and \quad 
+(C-\alpha_i)\xi_i=0
+\quad and \quad
+\alpha_i \left( y_i (\omega^T \mathbf{x}_i + b) - 1 + \xi_i \right) = 0
+$$
+
+The non-linearly separable case reduces to the following three conditions:
+
+$$
+\begin{aligned}
+\alpha_i = 0 &\implies y_i(\omega^Tx_i+b) \geq 1 \quad and \quad \xi_i = 0 \\
+0 < \alpha_i < C &\implies y_i(\omega^Tx_i+b) = 1 \quad and \quad \xi_i = 0 \\
+\alpha_i = C &\implies y_i(\omega^Tx_i+b) \leq 1 \quad and \quad \xi_i \geq 0
+\end{aligned}
+$$
+
+The first set of points are strictly outside the margin (correctly classified) and do not influence $\omega$. The non-zero $\alpha_i$ correspond to the support vectors. The second group are the support vectors that lie exactly on the margin. The third set are points that lie within the margin or are misclassified; these are also support vectors and push the solution via the penalty $C$.
+
+### Question 4
+
+For a give data space:$$
+\mathcal{D}_{n} = \{X_{i} \overset{\text{i.i.d}}{\thicksim} p_{X}(x), \space x_{i} \in \mathcal{X}, \space i = 1,2,...,n\}
+$$
+
+For a partition ($\mathcal{P}_k = C_1 \space \cup C_2 \space \cup ... \space \cup C_k$) with $k$ clusters, the within cluster sum of squares with is defined below. Note that this definition applies exclusively to distances where the cluster centroids are means (e.g Euclidean or Mahalanobis distances).
+
+$$
+WCSS = \sum_{j=1}^k \sum_{x \in C_j}|| x_i - \mu_j || \qquad where \quad i=\{1,...,n\}, \quad j=\{1,...,k\}
+$$
+
+The k-means algorithm alternates between the assignment (given fixed centroids $\mu_j$, update the cluster assignments $z_i$) and update (given fixed assignments $z_i$, update the cluster centroids $\mu_j$) steps. This process is a form of coordinate descent because it optimizes the WCSS with respect to one set of coordinates ($z_i$or $\mu_j$) while holding the other fixed.
+
+For the assignment step, each data point is assigned a new cluster label ($z_i^{new}$) by selecting the cluster with minimum distance between $x_i$ and the existing centroids ($\mu_j$).
+
+$$
+z_i^{\text{new}} = \underset{j \in \{1,...,k\}}{\text{argmin}} \space \left\{ d(x_i,\mu_j^{old})  \right\} \qquad \forall \space i\in \{1,...,n\}
+$$
+
+For Euclidean distance, this becomes:
+
+$$
+z_i^{\text{new}} = \underset{j \in \{1,...,k\}}{\text{argmin}} \space ||x_i - \mu_j^{old}||_2 
+\qquad \forall \space i\in \{1,...,n\}
+$$
+
+Since the new assignment $z_i^{\text{new}}$ is the one that minimizes $||{x}_i - {\mu}_j^{old}||_2$ over all possible clusters $k$, the new squared distance $||{x}_i - {\mu}_{j}^{new}||^2$ must be less than or equal to the old squared distance $||{x}_i - {\mu}_{j}^{old}||^2$. Summing over all points $x_i$, the new WCSS is less than or equal to the old WCSS:
+
+$$
+WCSS_{new} \leq WCSS_{old}
+$$
+
+$$
+\sum_{j=1}^k \sum_{x_i \in C_j^{new}}|| x_i - \mu_j^{new} || \leq \sum_{j=1}^k \sum_{x_i \in C_j^{old}}|| x_i - \mu_j^{old} ||
+$$
+
+For the update step, the cluster assignments ($z_i$) are fixed and we update the cluster centroids ($\mu$).
+
+$$
+\mu_j^{new} = \frac{1}{n_j^{new}} \sum^n_{i=1} \mathbf{1}(z_i^{new} = j)x_i
+$$
+
+${\mu}_j^{{new}}$ is the minimum of the convex function $g(j) = \sum_{x_i \in C_j} ||{x}_i - {\mu}_j||^2$ for the fixed assignments (proof below). Therefore, the new WCSS must be less than or equal to the old WCSS. To find the minimum of $g(j)$, we take the partial derivative with respect to $\mu_j$ and set it to zero:
+
+$$
+\begin{aligned}
+\frac{\partial g}{\partial{\mu}_j} 
+&= \sum_{x_i \in C_j} \frac{\partial}{\partial {\mu}_j} ||{x}_i - {\mu}_j||^2 \\
+&=\sum_{x_i \in C_j} 2({\mu}_j - {x}_i) \\ 
+&= 0
+\end{aligned}
+$$
+
+$$
+\sum_{x_i \in C_j} {\mu}_j = \sum_{x_i \in C_j}{x}_i
+$$
+
+$$
+n_j {\mu}_k = \sum_{x_i \in C_j} {x}_i \quad \text{where } n_j \text{ is the number of points in cluster } k
+$$$$
+{\mu}_j = \frac{1}{n_j} \sum_{x_i \in C_j} {x}_i
+$$ Since both the assignment step and the update step are optimizate the WCSS, the k-means algorithm is an iterative coordinate descent method guaranteed to converge to a local minimum of the WCSS.
+
+## Exercise 4: Reflection Video
+
+<https://youtu.be/MIU5ux8domQ>

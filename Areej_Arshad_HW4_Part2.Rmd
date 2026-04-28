@@ -1,0 +1,1224 @@
+---
+title: "STAT747 - Homework 4"
+subtitle: "Exercise 2: Comprehensive Classification"
+author: "Areej Arshad"
+date: "2025-11-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(ggplot2)
+library(corrplot)
+library(dplyr)
+library(RSNNS)
+library(caret)
+library(smotefamily)
+library(glmnet)   
+library(randomForest)
+library(gbm)
+library(e1071)
+library(nnet)
+library(pROC)
+library(nestedcv)
+library(ranger)
+library(kernlab)
+library(ParBayesianOptimization)
+library(pdp)
+```
+
+## Import Data
+
+```{r}
+data.2 <- read.csv("financial_transactions.csv")
+str(data.2)
+```
+
+The data has 10,000 observations of 50 numeric features (40 of which are unspecified behavior variables ranging between -5 and +5).
+
+## 1. EDA & Feature Engineering
+
+### a. Class distribution and correlation analysis
+
+```{r, fig.width = 3, fig.height = 3}
+# Class distribution
+table(data.2$Fraud)
+
+ggplot(data.2, aes(x = factor(Fraud))) +
+  geom_bar(fill = "steelblue") +
+  labs(title = "Fraud Class Distribution", 
+       x = "Fraud", y = "Count") +
+  theme_minimal() +
+  theme(plot.title = element_text(size = 10),
+        axis.title = element_text(size = 8), 
+        axis.text = element_text(size = 8))
+```
+
+The dataset exhibits a significant class imbalance, with approximately 80% of observations classified as "Not Fraud".
+
+```{r, fig.width = 5, fig.height = 5}
+# Correlation analysis
+numeric_vars <- data.2 |> select(where(is.numeric))
+corr_matrix <- cor(numeric_vars)
+
+corrplot(corr_matrix, method = "color", tl.cex = 0.5, cl.cex = 0.5,
+         cex.main = 1, type = "upper", mar = c(0, 0, 1, 0), tl.col = "black", 
+         title = "Correlation matrix for Financial Transaction Data")
+```
+
+The correlation matrix shows that most variables exhibit very weak linear association with each other and with the Fraud outcome. This suggests that fraud behavior is driven by complex, non-linear interactions rather than simple pairwise relationships.
+
+### b. Feature engineering: interactions, transformations
+
+A set of interaction features are engineered using variables such as `TimeOfDay`, `LocationRisk`, `UserHistory`, `MerchantScore`, `TransactionSpeed`, and `Amount` to capture relationships that may not be detectable through individual variables alone. Additionally, a squared term for `TransactionSpeed` is created to account for potential non-linear effects. Two aggregate summary features (mean and standard deviation) are also generated for the behavior-related attributes.
+
+```{r}
+data.2 <- data.2 |> 
+  mutate(Time_Loc = TimeOfDay * LocationRisk,
+         Time_IntlFlag = TimeOfDay * IntlFlag,
+         User_Merchant = UserHistory * MerchantScore,
+         Device_Transaction = DeviceScore * TransactionSpeed,
+         Amount_Transaction = Amount* TransactionSpeed,
+         Mean_Behavior = rowMeans(across(contains("Behavior"))),
+         Behavior_SD = apply(across(contains("Behavior")), 1, sd),
+         TransactionSpeed_Sqaured = TransactionSpeed ^ 2)
+```
+
+### c. Class imbalance handling using SMOTE
+
+The SMOTE method generates new synthetic data for the minority class (1: "Fraud") by randomly selecting one of the five nearest-neighbors for each data point, creating a new instance along the extrapolated line between the original sample and its selected neighbor.
+
+```{r}
+# Convert Fraud to Factor
+data.2$Fraud <- as.factor(data.2$Fraud)
+
+# Train-Test Split (80-20)
+set.seed(747)
+split_idx <- createDataPartition(data.2$Fraud, p = 0.8, list = FALSE)
+train_data <- data.2[split_idx, ]
+test_data  <- data.2[-split_idx, ]
+
+# Apply SMOTE
+smote_result <- SMOTE(X = train_data[, -1],
+                   target = train_data$Fraud,
+                   K = 5, dup_size = 0)  
+
+smote_train <- data.frame(smote_result$data)
+names(smote_train)[names(smote_train) == "class"] <- "Fraud"
+smote_train$Fraud <- as.factor(smote_train$Fraud)
+
+# Check new balance
+table(smote_train$Fraud)
+```
+
+The resulting training set has 11,229 samples and a more balanced class distribution.
+
+## 2. Model Specification & Training
+
+```{r}
+# Ensure Fraud is a factor variable across all datasets
+train_data$Fraud <- factor(train_data$Fraud, 
+                           levels = c("1","0"), 
+                           labels = c("Fraud","NoFraud"))
+test_data$Fraud  <- factor(test_data$Fraud, 
+                           levels = c("1","0"), 
+                           labels = c("Fraud","NoFraud"))
+smote_train$Fraud <- factor(smote_train$Fraud, 
+                            levels = c("1","0"), 
+                            labels = c("Fraud","NoFraud")) 
+
+# Create x and y segments of Train-Test split
+x_train <- smote_train[, setdiff(names(smote_train), "Fraud")]
+y_train <- smote_train$Fraud
+
+x_test  <- test_data[, setdiff(names(test_data), "Fraud")]
+y_test  <- test_data$Fraud
+
+# Common CV control (5-fold)
+ctrl <- trainControl(method = "cv", number = 5, classProbs = TRUE, 
+                     savePredictions = "final")
+```
+
+### a. Model Implementation (Regularized Logistic, Random Forest, Gradient Boosting, SVM) and Parameter Tuning
+
+**i. Regularized Logistic Regression**
+
+The hyperparameter grid for Regularized Logistic Regression allows cross-validation for pure Lasso (alpha = 1) and Ridge (alpha = 0) regression models, as well as Elastic Net (alpha = 0.5).
+
+```{r}
+# Hyper-parameter Grid
+logit_grid <- expand.grid(alpha  = c(0, 0.5, 1),
+                          lambda = 10^seq(-3, 1, length.out = 20))
+
+# Cross Validation for hyperparameter tuning
+# set.seed(747)
+# fit_logit <- train(x = x_train, y = y_train,
+#                    method = "glmnet", metric = "Accuracy",
+#                    trControl = ctrl, preProcess = c("center", "scale"),
+#                    tuneGrid = logit_grid)
+
+#saveRDS(fit_logit,  "logit_model1.rds")
+fit_logit <- readRDS("logit_model1.rds")
+
+fit_logit
+best_logit <- fit_logit$bestTune
+```
+
+Results from the five-fold cross validation suggest that the Elastic Net model (alpha = 0.5), with penalty parameter lambda = 0.001, performs the best (accuracy 84.25%).This process is repeated K times, with each outer fold serving as the test set exactly once.
+
+**ii. Random Forest**
+
+The optimal hyperparameter mtry (the number of features randomly selected at each split of a tree) is identified using five-fold cross validation.
+
+```{r}
+rf_grid <- expand.grid(mtry = c(5, 10, 15, 20, 25))
+
+# set.seed(747)
+# fit_rf <- train(Fraud ~ ., data = smote_train, method = "rf",
+#                 metric = "Accuracy", trControl = ctrl,
+#                 tuneGrid  = rf_grid, ntree = 500)
+
+#saveRDS(fit_rf,  "rf_model1.rds")
+fit_rf <- readRDS("rf_model1.rds")
+
+fit_rf
+best_rf <- fit_rf$bestTune
+```
+
+The model achieved the highest classification accuracy (90.64%) with `mtry` = 5. Accuracy decreased as `mtry` increased, indicating that smaller feature subsets result in higher tree diversity and improved generalization.
+
+**iii. Gradient Boosting**
+
+```{r}
+gbm_grid <- expand.grid(n.trees = c(100, 200, 300, 500), 
+                        interaction.depth= c(2, 3, 4),
+                        shrinkage = c(0.05, 0.1),
+                        n.minobsinnode = c(20, 40))
+
+# set.seed(747)
+# fit_gbm <- train(Fraud ~ ., data = smote_train,
+#                  method = "gbm", metric = "Accuracy",
+#                  trControl = ctrl, verbose = FALSE,
+#                  tuneGrid = gbm_grid)
+
+#saveRDS(fit_gbm,  "gbm_model1.rds")
+fit_gbm <- readRDS("gbm_model1.rds")
+
+fit_gbm
+best_gbm <- fit_gbm$bestTune
+```
+
+Stochastic Gradient Boosting showed steadily improving accuracy as the number of trees and interaction depth increased. The best performance was achieved with a deeper model (depth = 4 splits), larger terminal node size, and a moderate learning rate (0.1), indicating that stronger learners combined with slow shrinkage provided the best generalization.
+
+**iv. Support Vector Classification**
+
+```{r}
+svm_grid <- expand.grid(C = c(0.01, 0.1, 1, 5, 10))
+
+# set.seed(747)
+# fit_svm <- train(x = x_train, y = y_train,
+#                  method = "svmLinear", metric = "Accuracy",
+#                  trControl = ctrl, preProcess = c("center", "scale"),
+#                  tuneGrid = svm_grid)
+
+#saveRDS(fit_svm, "svm_model1.rds")
+fit_svm <- readRDS("svm_model1.rds")
+
+fit_svm
+best_svm <- fit_svm$bestTune
+
+```
+
+Model accuracy is fairly stable with respect to the cost parameter `C`, with the best classification accuracy (84.26%) at `C` = 0.1. These results suggest that allowing some boundary violations prevent overfitting and provide better generalization.
+
+### b. Neural network approaches (MLP)
+
+```{r}
+mlp_grid <- expand.grid(size  = c(5, 10, 15), 
+                        decay = c(0.0001, 0.001, 0.01))
+
+# set.seed(747)
+# fit_mlp <- train(Fraud ~ ., data = smote_train,
+#                  method = "nnet", metric = "Accuracy",
+#                  trControl = ctrl, preProcess = c("center", "scale"),
+#                  tuneGrid = mlp_grid, trace = FALSE, maxit = 200)
+
+#saveRDS(fit_mlp, "mlp_model1.rds")
+fit_mlp <- readRDS("mlp_model1.rds")
+
+fit_mlp
+```
+
+The neural network achieved its best performance with 15 hidden units and a decay of 0.01. Accuracy generally increased with larger network size and higher regularization, suggesting the model benefited from greater capacity paired with stronger weight decay.
+
+### c. Model comparisons
+
+**i. Regularized Logistic Regression**
+
+```{r}
+pred_logit <- predict(fit_logit, newdata = x_test)
+cm_logit_cv <- confusionMatrix(pred_logit, y_test)
+cm_logit_cv
+```
+
+Logistic Regression achieves strong balanced accuracy with high specificity (0.85) and reasonable sensitivity (0.78), meaning it catches most fraud cases without too many false alarms.
+
+**ii. Random Forest**
+
+```{r}
+pred_rf <- predict(fit_rf, newdata = test_data)
+cm_rf_cv <- confusionMatrix(pred_rf, y_test)
+cm_rf_cv
+```
+
+Random Forest achieves the highest accuracy (85.09%) among all models but suffers from very low sensitivity (0.44), indicating that it is unable to identify fraud cases well.
+
+**iii. Gradient Boosting**
+
+```{r}
+pred_gbm <- predict(fit_gbm, newdata = test_data)
+cm_gbm_cv <- confusionMatrix(pred_gbm, y_test)
+cm_gbm_cv
+```
+
+Gradient Boosting offers a stronger balance between sensitivity (0.66) and specificity (0.89), making it better than RF at detecting fraud while still keeping false positives relatively low.
+
+**iv. Support Vector Classification**
+
+```{r}
+pred_svm <- predict(fit_svm, newdata = x_test)
+cm_svm_cv <- confusionMatrix(pred_svm, y_test)
+cm_svm_cv
+```
+
+The SVM performs similarly to Logistic Regression, with strong sensitivity (0.77) and specificity (0.85). It gives stable and well-balanced predictions, consistently identifying fraud cases without a large increase in false positives.
+
+**v. Neural Network (MLP)**
+
+```{r}
+pred_mlp <- predict(fit_mlp, newdata = test_data)
+cm_mlp_cv <- confusionMatrix(pred_mlp, y_test)
+cm_mlp_cv
+```
+
+The MLP shows the weakest performance, with lower sensitivity (0.58) and balanced accuracy. It struggles to capture fraud patterns and produces more false negatives compared to the other models.
+
+**vi. ROC Curves**
+
+```{r}
+# Prediction probabilities
+prob_logit <- predict(fit_logit, newdata = x_test, type = "prob")[,"Fraud"]
+prob_rf <- predict(fit_rf, newdata = test_data, type = "prob")[,"Fraud"]
+prob_gbm <- predict(fit_gbm, newdata = test_data, type = "prob")[,"Fraud"]
+prob_svm <- predict(fit_svm, newdata = x_test, type = "prob")[,"Fraud"]
+prob_mlp <- predict(fit_mlp, newdata = test_data, type = "prob")[,"Fraud"]
+
+# Compute ROC objects
+roc_logit <- roc(y_test, prob_logit)
+roc_rf <- roc(y_test, prob_rf)
+roc_gbm <- roc(y_test, prob_gbm)
+roc_svm <- roc(y_test, prob_svm)
+roc_mlp <- roc(y_test, prob_mlp)
+
+# AUC Comparison table
+auc_cv <- data.frame(Model = c("Logistic", "Random Forest", "GBM", "SVM", "MLP"),
+                      AUC = c(auc(roc_logit), auc(roc_rf), auc(roc_gbm), 
+                              auc(roc_svm), auc(roc_mlp)))
+
+# Plot all ROC curves
+plot(roc_logit, col="blue",  lwd = 2, 
+     main="ROC Curves for All Models", legacy.axes = TRUE)
+lines(roc_rf, col="red",   lwd=2)
+lines(roc_gbm, col="green", lwd=2)
+lines(roc_svm, col="purple",lwd=2)
+lines(roc_mlp, col="orange",lwd=2)
+
+legend("bottomright",
+       legend = paste(auc_cv$Model, "AUC =", round(auc_cv$AUC, 3)),
+       col = c("blue", "red", "green", "purple", "orange"),
+       lwd = 2, cex = 0.75, bg = "white")
+```
+
+The ROC curves show that all models demonstrate strong discrimination, with Logistic Regression performing the best (closely followed by Support Vector Classification). The Random Forest, and Gradient Boosting models also perform well. The MLP has the worst performance among all models, indicating higher variance and less stable classification.
+
+## 3. Model Selection & Tuning
+
+### a. Nested cross-validation design
+
+Nested cross validation allows for hyperparameter tuning and estimation of model generalization simultaneously using outer and inner loops. The outer loop subsets the data into K folds, with K-1 folds used for hyperparameter tuning using cross validation in the inner loop. The optimal hyperparameters from the inner loop are used to estimate prediction accuracy for the test set selected in the outer loop. This process is repeated K times, with each outer fold serving as the test set exactly once.
+
+Nested cross-validation is computationally expensive for the models under consideration as tree based models and neural network approaches are sensitive to large sample sizes, while SVMs (dual optimization using the kernlab library) struggle to handle data with a large number of features. Therefore, a random sub-sample of the train data is selected for the nested cross validation process.
+
+```{r}
+set.seed(747)
+n_samples <- 2500
+
+# generate random row indices
+idx <- sample(nrow(x_train), n_samples)
+
+# subset x and y consistently
+smote_train_small <- smote_train[idx, ]
+x_train_small <- x_train[idx, ]
+y_train_small <- y_train[idx]
+```
+
+**i. Regularized Logistic Regression**
+
+```{r}
+x <- as.matrix(x_train_small)
+y <- factor(y_train_small) 
+
+set.seed(747)
+
+# Nested CV model 
+fit_logit_ncv <- nestcv.glmnet(y = y, x = x, family = "binomial",
+                              alphaSet = seq(0, 1, length.out = 5),
+                              lambdaSet = 10^seq(-4, 1, length.out = 20), 
+                              metric = "Accuracy",
+                              preProcess = c("center", "scale"),
+                              n_outer_folds = 3,
+                              n_inner_folds = 3)
+fit_logit_ncv
+```
+
+```{r}
+# Predictive Performance
+pred_logit_ncv <- predict(fit_logit_ncv, newdata = x_test, type = "class")
+pred_logit_ncv <- factor(pred_logit_ncv, levels = levels(y_test))
+cm_logit_ncv <- caret::confusionMatrix(pred_logit_ncv, y_test)
+cm_logit_ncv
+```
+
+Nested cross-validation identified a LASSO-regularized logistic regression as the best model, indicating that strong coefficient sparsity improved generalization. The final model retained a subset of behavioral and risk-related predictors. Validation performance for the optimal hyperparameters was strong (AUC = 0.9206 and accuracy = 84.40%), and test set performance demonstrated stable accuracy (83.3%).
+
+**ii. Random Forest**
+
+```{r}
+set.seed(747)
+
+# Nested CV model
+fit_rf_ncv <- nestcv.train(y = y, x = x, method = "rf",
+                           ntree = 100,
+                           tuneGrid = rf_grid,
+                           n_outer_folds = 3,
+                           n_inner_folds = 3)
+
+fit_rf_ncv$summary
+fit_rf_ncv$bestTunes
+fit_rf_ncv$finalTune
+```
+
+```{r}
+# Predictive Performance
+pred_rf_ncv <- predict(fit_rf_ncv, newdata = x_test, type = "raw")
+pred_rf_ncv <- factor(pred_rf_ncv, levels = levels(y_test))
+cm_rf_ncv <- caret::confusionMatrix(pred_rf_ncv, y_test)
+cm_rf_ncv
+```
+
+Nested cross-validation selected an optimal mtry of 25, indicating that the random forest model benefited from considering a relatively large subset of predictors at each split. The model achieved 82.1% accuracy on the test set. It was very good at identifying non-fraud cases (87% specificity) but struggled with detecting fraud (62% sensitivity).
+
+**iii. Gradient Boosting**
+
+```{r}
+set.seed(747)
+
+# Nested CV model
+fit_gbm_ncv <- nestcv.train(y = y, x = x, method = "gbm",
+                           tuneGrid = gbm_grid,
+                           n_outer_folds = 3,
+                           n_inner_folds = 3)
+fit_gbm_ncv$summary
+fit_gbm_ncv$bestTunes
+fit_gbm_ncv$finalTune
+```
+
+```{r}
+# Predictive Performance
+pred_gbm_ncv <- predict(fit_gbm_ncv, newdata = x_test, type = "raw")
+pred_gbm_ncv <- factor(pred_gbm_ncv, levels = levels(y_test))
+cm_gbm_ncv <- caret::confusionMatrix(pred_gbm_ncv, y_test)
+cm_gbm_ncv
+```
+
+The tuned GBM model (300 trees, depth 3, shrinkage 0.1) performed well on the test set, achieving 83.4% accuracy. It detected fraud more effectively than the Random Forest model (71.5% sensitivity) while maintaining strong specificity (86.5%).
+
+**iv. Support Vector Classification**
+
+```{r}
+set.seed(747)
+
+# Nested CV model 
+fit_svm_ncv <- nestcv.train(y = y, x = x, method = "svmLinear", 
+                           tuneGrid = svm_grid,
+                           n_outer_folds = 3,
+                           n_inner_folds = 3)
+fit_svm_ncv$summary
+fit_svm_ncv$bestTunes
+fit_svm_ncv$finalTune
+```
+
+```{r}
+# Predictive Performance
+pred_svm_ncv <- predict(fit_svm_ncv, newdata = x_test, type = "raw")
+pred_svm_ncv <- factor(pred_svm_ncv, levels = levels(y_test))
+cm_svm_ncv <- caret::confusionMatrix(pred_svm_ncv, y_test)
+cm_svm_ncv
+```
+
+The linear SVM showed strong performance during nested CV (AUC = 0.9173, accuracy = 83.9%) and generalized well to the test set with 83.5% accuracy. It achieved high sensitivity (79.2%) and solid specificity (84.6%), indicating effective detection of fraud while maintaining good performance on non-fraud cases.
+
+**v. Neural Network (MLP)**
+
+```{r}
+# Nested CV model 
+fit_mlp_ncv <- nestcv.train(y = y, x = x, method = "mlpWeightDecay", 
+                           tuneGrid = mlp_grid,
+                           n_outer_folds = 3,
+                           n_inner_folds = 3)
+fit_mlp_ncv$summary
+fit_mlp_ncv$bestTunes
+fit_mlp_ncv$finalTune
+```
+
+```{r}
+# Predictive Performance
+pred_mlp_ncv <- predict(fit_mlp_ncv, newdata = x_test, type = "raw")
+pred_mlp_ncv <- factor(pred_mlp_ncv, levels = levels(y_test))
+cm_mlp_ncv <- caret::confusionMatrix(pred_mlp_ncv, y_test)
+cm_mlp_ncv
+```
+
+The neural network performed well during nested CV (AUC = 0.9127, accuracy = 83.8%), but showed a modest drop on the test set with 80.1% accuracy. Test set specificity remained strong (80.6%), while sensitivity was slightly lower (78.2%), indicating balanced detection across both classes.
+
+Additionally, the use of a 2500-sample subset of the training data was highly successful in reducing the computational cost for all machines.
+
+**vi. ROC Curves**
+
+```{r}
+# Prediction probabilities
+prob_logit_ncv <- predict(fit_logit_ncv, newdata = x_test, type = "response")
+prob_rf_ncv <- predict(fit_rf_ncv, newdata = test_data, type = "prob")[,"Fraud"]
+prob_gbm_ncv <- predict(fit_gbm_ncv, newdata = test_data, type = "prob")[,"Fraud"]
+prob_svm_ncv <- predict(fit_svm_ncv, newdata = x_test, type = "prob")[,"Fraud"]
+prob_mlp_ncv <- predict(fit_mlp_ncv, newdata = test_data, type = "prob")[,"Fraud"]
+
+# Compute ROC objects
+roc_logit_ncv <- roc(y_test, prob_logit_ncv)
+roc_rf_ncv <- roc(y_test, prob_rf_ncv)
+roc_gbm_ncv <- roc(y_test, prob_gbm_ncv)
+roc_svm_ncv <- roc(y_test, prob_svm_ncv)
+roc_mlp_ncv <- roc(y_test, prob_mlp_ncv)
+
+# AUC Comparison table
+auc_ncv <- data.frame(Model = c("Logistic", "Random Forest", "GBM", "SVM", "MLP"),
+                      AUC = c(auc(roc_logit_ncv), auc(roc_rf_ncv), auc(roc_gbm_ncv), 
+                              auc(roc_svm_ncv), auc(roc_mlp_ncv)))
+
+# Plot all ROC curves
+plot(roc_logit_ncv, col="blue",  lwd = 2, 
+     main="ROC Curves for All Models (Nested CV)", legacy.axes = TRUE)
+lines(roc_rf_ncv, col="red",   lwd=2)
+lines(roc_gbm_ncv, col="green", lwd=2)
+lines(roc_svm_ncv, col="purple",lwd=2)
+lines(roc_mlp_ncv, col="orange",lwd=2)
+
+legend("bottomright",
+       legend = paste(auc_ncv$Model, "AUC =", round(auc_ncv$AUC, 3)),
+       col = c("blue", "red", "green", "purple", "orange"),
+       lwd = 2, cex = 0.75, bg = "white")
+```
+
+Across the nested CV ROC curves, logistic regression and SVM achieved the strongest discrimination (AUC = 0.90), closely followed by GBM and MLP. Random Forest showed slightly lower performance (AUC = 0.855), but still maintained competitive separation between classes.
+
+### b. Bayesian hyperparameter optimization
+
+Bayesian optimization searches for the optimal hyperparameters using a probabilistic approach, learning from past results, allowing models to choose hyperparameter values more efficiently than grid or random search.
+
+**i. Regularized Logistic Regression**
+
+```{r}
+x_train_small <- as.matrix(x_train_small)
+x_test <- as.matrix(x_test)  
+y_num_small <- ifelse(y_train_small == "Fraud", 1, 0)
+cv_folds <- createFolds(y_num_small, k = 5, returnTrain = TRUE)
+
+# logit_bayes <- function(alpha, lambda) {
+#   acc_values <- c()
+#   alpha  <- as.numeric(alpha)
+#   lambda <- as.numeric(lambda)
+#     
+#   for (i in seq_along(cv_folds)) {
+#     train_idx <- cv_folds[[i]]
+#     test_idx  <- setdiff(seq_len(nrow(x_train_small)), train_idx)
+#     model <- glmnet(x = x_train_small[train_idx, ],
+#                     y = y_num_small[train_idx],
+#                     family = "binomial",
+#                     alpha = alpha, lambda = lambda)
+#     pred_prob <- predict(model, newx = x_train_small[test_idx, ], type = "response")
+#     pred_class <- ifelse(pred_prob > 0.5, 1, 0)
+#     acc_values[i] <- mean(pred_class == y_num_small[test_idx])
+#   }
+#   list(Score = mean(acc_values))
+# }
+# 
+# # Search Space
+# bounds <- list(alpha = c(0, 1), lambda = c(1e-3, 1))
+# 
+# # Bayesian Optimization
+# set.seed(747)
+# opt_result <- bayesOpt(FUN = logit_bayes, bounds = bounds,
+#                        initPoints = 5, iters.n = 15,
+#                        acq = "ucb", parallel = FALSE)
+
+#saveRDS(opt_result, "opt_result.rds")
+opt_result  <- readRDS("opt_result.rds")
+```
+
+```{r}
+# Final Model with optimal hyperparameters
+logit_best_pars <- getBestPars(opt_result)
+best_alpha  <- logit_best_pars$alpha
+best_lambda <- logit_best_pars$lambda
+# fit_logit_bho <- glmnet(x = x_train_small,
+#                         y = y_num_small,
+#                         family = "binomial",
+#                         alpha = best_alpha,
+#                         lambda = best_lambda)
+#saveRDS(fit_logit_bho,  "logit_model.rds")
+fit_logit_bho <- readRDS("logit_model.rds")
+
+# Predictive Performance
+pred_prob_bho <- predict(fit_logit_bho, newx = x_test, type = "response")
+pred_logit_bho <- ifelse(pred_prob_bho > 0.5, "Fraud", "NoFraud")
+pred_logit_bho <- factor(pred_logit_bho, levels = levels(y_test))
+
+cm_logit_bho <- caret::confusionMatrix(pred_logit_bho, y_test)
+cm_logit_bho
+```
+
+The Bayesian-optimized logistic model performed well, reaching 83.99% accuracy with a balanced mix of stable sensitivity (0.76) and strong specificity (0.86).
+
+**ii. Random Forest**
+
+```{r}
+# rf_bayes <- function(mtry, nodesize) {
+#   acc_values <- numeric(length(cv_folds))
+# 
+#   for (i in seq_along(cv_folds)) {
+#     train_idx <- cv_folds[[i]]
+#     test_idx  <- setdiff(seq_len(nrow(x_train_small)), train_idx)
+# 
+#     rf_model <- randomForest(x = x_train_small[train_idx, ],
+#                              y = factor(y_num_small[train_idx]),
+#                              mtry = floor(mtry), 
+#                              nodesize = floor(nodesize), ntree = 300)
+#     pred <- predict(rf_model, x_train_small[test_idx, ])
+#     acc_values[i] <- mean(pred == factor(y_num_small[test_idx]))}
+# 
+#   list(Score = mean(acc_values))}
+# 
+# # Search Space
+# bounds_rf <- list(mtry = c(2, ncol(x_train_small) / 2), nodesize = c(1, 20))
+# 
+# # Bayesian Optimization
+# set.seed(747)
+# opt_rf <- bayesOpt(FUN = rf_bayes, bounds = bounds_rf,
+#                    initPoints = 8, iters.n = 10, acq = "ucb")
+
+#saveRDS(opt_rf, "opt_rf.rds")
+opt_rf  <- readRDS("opt_rf.rds")
+```
+
+```{r}
+# Final Model with optimal hyperparameters
+rf_best_pars <- getBestPars(opt_rf)
+best_mtry <- round(rf_best_pars$mtry, 1)
+best_nodesize <- rf_best_pars$mtry
+
+# fit_rf_bho <- randomForest(x = x_train_small, y = y_train_small,
+#                            mtry = best_mtry, nodesize = best_nodesize,
+#                            ntree = 100, importance = TRUE)
+#saveRDS(fit_rf_bho,  "rf_model.rds")
+fit_rf_bho <- readRDS("rf_model.rds")
+
+# Predictive Performance
+pred_rf_bho <- predict(fit_rf_bho, newdata = x_test, type = "class")
+pred_rf_bho <- factor(pred_rf_bho, levels = levels(y_test))
+cm_rf_bho <- caret::confusionMatrix(pred_rf_bho, y_test, positive = "Fraud")
+cm_rf_bho
+```
+
+The Bayesian-optimized Random Forest reaches a strong 84% accuracy, driven mostly by its high specificity (0.91). However, it clearly struggles with sensitivity (0.59), missing many fraud cases.
+
+**iii. Gradient Boosting**
+
+```{r}
+# gbm_bayes <- function(n.trees, depth, shrinkage, n.minobsinnode) {
+#   n.trees <- round(n.trees)
+#   depth <- round(depth)
+#   acc_values <- c()
+# 
+#   for (i in seq_along(cv_folds)) {
+#     train_idx <- cv_folds[[i]]
+#     test_idx  <- setdiff(seq_len(nrow(x_train_small)), train_idx)
+#     model <- gbm(formula = y_num_small ~ .,
+#                  data = data.frame(y_num_small = y_num_small[train_idx],
+#                                    x_train_small[train_idx, ]),
+#                  distribution = "bernoulli",
+#                  n.trees = n.trees,
+#                  interaction.depth = depth,
+#                  shrinkage = shrinkage,
+#                  n.minobsinnode = n.minobsinnode,
+#                  verbose = FALSE)
+#     
+#     pred_prob <- predict(model,
+#                          newdata = data.frame(x_train_small[test_idx, ]),
+#                          n.trees = n.trees,
+#                          type = "response")
+#     pred_class <- ifelse(pred_prob > 0.5, 1, 0)
+#     acc_values[i] <- mean(pred_class == y_num_small[test_idx])}
+# 
+#   list(Score = mean(acc_values))}
+# 
+# # Search Space
+# bounds_gbm <- list(n.trees = c(100, 600),
+#                    depth = c(1, 5),
+#                    shrinkage = c(0.01, 0.3),
+#                    n.minobsinnode = c(10, 50))
+# 
+# # Bayesian Optimization
+# set.seed(747)
+# opt_gbm <- bayesOpt(FUN = gbm_bayes, 
+#                     bounds = bounds_gbm,
+#                     initPoints = 10, 
+#                     iters.n = 15, acq = "ucb")
+#saveRDS(opt_gbm, "opt_gbm.rds")
+opt_gbm  <- readRDS("opt_gbm.rds")
+```
+
+```{r}
+# # Final Model with optimal hyperparameters
+gbm_best_pars <- getBestPars(opt_gbm)
+best_ntrees <- round(gbm_best_pars$n.trees,0)
+best_interaction_depth <- gbm_best_pars$depth
+best_shrinkage <- gbm_best_pars$shrinkage
+best_minobsinnode <- gbm_best_pars$n.minobsinnode
+# 
+# fit_gbm_bho <- gbm(y_num_small ~ ., 
+#                    data = data.frame(x_train_small, y_num_small),
+#                    distribution = "bernoulli",
+#                    n.trees = best_ntrees,
+#                    interaction.depth = best_interaction_depth,
+#                    shrinkage = best_shrinkage,
+#                    n.minobsinnode = best_minobsinnode,
+#                    cv.folds = 0,
+#                    verbose = FALSE)
+# saveRDS(fit_gbm_bho,  "gbm_model.rds")
+fit_gbm_bho <- readRDS("gbm_model.rds")
+
+# Predictive Performance
+pred_prob_gbm <- predict(fit_gbm_bho, 
+                         newdata = data.frame(x_test), 
+                         n.trees = best_ntrees,
+                         type = "response")
+pred_gbm_class <- ifelse(pred_prob_gbm > 0.5, "Fraud", "NoFraud")
+pred_gbm_class <- factor(pred_gbm_class, levels = levels(y_test))
+
+cm_gbm_bho <- caret::confusionMatrix(pred_gbm_class, y_test, positive = "Fraud")
+cm_gbm_bho
+```
+
+The Bayesian-optimized GBM achieves 84% accuracy, with a more balanced performance than Random Forest. It improves sensitivity to 0.69, catching more fraud cases, while maintaining strong specificity at 0.88.
+
+**iv. Support Vector Classification**
+
+```{r}
+# svm_linear_bayes <- function(C) {
+#   acc_values <- c()
+#   
+#   for (i in seq_along(cv_folds)) {
+#     train_idx <- cv_folds[[i]]
+#     test_idx  <- setdiff(seq_len(nrow(x_train_small)), train_idx)
+# 
+#     model <- ksvm(x_train_small[train_idx, ],
+#                   factor(y_num_small[train_idx]),
+#                   type = "C-svc", kernel = "vanilladot", 
+#                   C = C, scaled = TRUE)
+# 
+#     pred <- predict(model, x_train_small[test_idx, ])
+#     pred_class <- ifelse(pred == "1", 1, 0)
+#     acc_values[i] <- mean(pred_class == y_num_small[test_idx])}
+# 
+#   list(Score = mean(acc_values))}
+# 
+# # Search Space
+# bounds_svm_linear <- list(C = c(0.001, 10))
+# 
+# # Bayesian optimization
+# set.seed(747)
+# opt_svm_linear <- bayesOpt(FUN = svm_linear_bayes,
+#                            bounds = bounds_svm_linear,
+#                            initPoints = 10, iters.n = 15,
+#                            acq = "ucb", parallel = FALSE)
+#saveRDS(opt_svm_linear, "opt_svm.rds")
+opt_svm <- readRDS("opt_svm.rds")
+```
+
+```{r}
+# Final Model with optimal hyperparameters
+svm_best_pars <- getBestPars(opt_svm)
+best_C <- svm_best_pars$C
+# 
+# fit_svm_bho <- ksvm(x = x_train_small,
+#                     y = factor(y_num_small),
+#                     type = "C-svc",
+#                     kernel = "vanilladot",
+#                     C = best_C,
+#                     scaled = TRUE,
+#                     prob.model = TRUE)
+# saveRDS(fit_svm_bho,  "svm_model.rds")
+fit_svm_bho <- readRDS("svm_model.rds")
+
+# Predictive Performance
+pred_svm_bho <- predict(fit_svm_bho, x_test, type = "response")
+pred_svm_class <- ifelse(pred_svm_bho == "1", "Fraud", "NoFraud")
+pred_svm_class <- factor(pred_svm_class, levels = levels(y_test))
+
+cm_svm_bho <- caret::confusionMatrix(pred_svm_class, y_test, positive = "Fraud")
+cm_svm_bho
+```
+
+The Bayesian-optimized linear SVM reaches 83% accuracy, performing similarly to logistic regression but with slightly stronger balance. It shows good sensitivity (0.80) while maintaining solid specificity (0.84), making it one of the more stable and reliable classifiers overall.
+
+**v. Neural Network (MLP)**
+
+```{r mlp bho}
+# mlp_bayes <- function(size, decay) {
+#   size <- round(size)
+#   acc_values <- c()
+# 
+#   for (i in seq_along(cv_folds)) {
+#     train_idx <- cv_folds[[i]]
+#     test_idx  <- setdiff(seq_len(nrow(x_train_small)), train_idx)
+# 
+#     model <- nnet(x = x_train_small[train_idx, ],
+#                   y = class.ind(factor(y_num_small[train_idx])),
+#                   size = size, decay = decay, maxit = 300,
+#                   trace = FALSE, linout = FALSE, softmax = TRUE)
+# 
+#     pred_prob <- predict(model, x_train_small[test_idx, ])[, 2]
+#     pred_class <- ifelse(pred_prob > 0.5, 1, 0)
+#     acc_values[i] <- mean(pred_class == y_num_small[test_idx])}
+# 
+#   list(Score = mean(acc_values))}
+# 
+# # Search Space
+# bounds_mlp <- list(size  = c(2, 10), decay = c(1e-4, 1e-1))
+# 
+# # Bayesian Optimization
+# set.seed(747)
+# opt_mlp <- bayesOpt(FUN = mlp_bayes, bounds = bounds_mlp,
+#                     initPoints = 8, iters.n = 10, acq = "ucb")
+# saveRDS(opt_mlp, "opt_mlp.rds")
+opt_mlp <- readRDS("opt_mlp.rds")
+```
+
+```{r}
+# Final Model with optimal hyperparameters
+mlp_best_pars <- getBestPars(opt_mlp)
+best_size <- mlp_best_pars$size
+best_decay <- mlp_best_pars$decay
+# 
+# # Final MLP model with optimal hyperparameters
+# fit_mlp_bho <- nnet(x = x_train_small,
+#                     y = class.ind(factor(y_num_small)),
+#                     size = best_size, decay = best_decay,
+#                     maxit = 500, trace = FALSE,
+#                     linout = FALSE, softmax = TRUE)
+# saveRDS(fit_mlp_bho,  "mlp_model.rds")
+fit_mlp_bho <- readRDS("mlp_model.rds")
+
+# Predictive Performance
+pred_prob_mlp <- predict(fit_mlp_bho, x_test)[, 2]  # Probability of class "1"
+pred_mlp_class <- ifelse(pred_prob_mlp > 0.5, "Fraud", "NoFraud")
+pred_mlp_class <- factor(pred_mlp_class, levels = levels(y_test))
+
+cm_mlp_bho <- caret::confusionMatrix(pred_mlp_class, y_test, positive = "Fraud")
+cm_mlp_bho
+```
+
+The Bayesian-optimized MLP achieves 81% accuracy, performing competitively with other models. It shows moderate sensitivity (0.75) and strong specificity (0.82), indicating reliable identification of non-fraud transactions.
+
+**vi. ROC Curves**
+
+```{r}
+# Prediction probabilities
+prob_logit_bho <- as.numeric(predict(fit_logit_bho, newx = x_test, type = "response"))
+prob_rf_bho <- predict(fit_rf_bho, newdata = x_test, type = "prob")[, "Fraud"]
+prob_gbm_bho <- predict(fit_gbm_bho, newdata = data.frame(x_test), 
+                        n.trees = best_ntrees, type = "response")
+prob_svm_bho <- predict(fit_svm_bho, x_test, type = "probabilities")[, "1"]
+prob_mlp_bho <- predict(fit_mlp_bho, x_test)[, 2]  
+y_test_numeric <- ifelse(y_test == "Fraud", 1, 0)
+
+# ROC Objects
+roc_logit_bho <- roc(y_test_numeric, prob_logit_bho)
+roc_rf_bho <- roc(y_test_numeric, prob_rf_bho)
+roc_gbm_bho <- roc(y_test_numeric, prob_gbm_bho)
+roc_svm_bho <- roc(y_test_numeric, prob_svm_bho)
+roc_mlp_bho <- roc(y_test_numeric, prob_mlp_bho)
+
+# Plot ROC Curves
+plot(roc_logit_bho, col = "blue", lwd = 2, 
+     main = "ROC Curves for All Models (Bayesian Optimization)", 
+     legacy.axes = TRUE)
+lines(roc_rf_bho, col = "red", lwd = 2)
+lines(roc_gbm_bho, col = "green", lwd = 2)
+lines(roc_svm_bho, col = "purple", lwd = 2)
+lines(roc_mlp_bho, col = "orange", lwd = 2)
+
+# Add AUC values to legend
+legend("bottomright",
+       legend = c(paste("Logistic (AUC =", round(auc(roc_logit_bho), 3), ")"),
+                  paste("Random Forest (AUC =", round(auc(roc_rf_bho), 3), ")"),
+                  paste("GBM (AUC =", round(auc(roc_gbm_bho), 3), ")"),
+                  paste("SVM (AUC =", round(auc(roc_svm_bho), 3), ")"),
+                  paste("MLP (AUC =", round(auc(roc_mlp_bho), 3), ")")),
+       col = c("blue", "red", "green", "purple", "orange"), 
+       lwd = 2, cex = 0.8)
+```
+
+The ROC curves show that logistic regression achieves the highest AUC (0.902), indicating the strongest overall discrimination between fraud and non-fraud. SVM and MLP follow closely, performing consistently well across most false-positive rates. Random Forest (0.865) and GBM (0.883) perform reasonably but show slightly weaker separation compared to the linear and neural models.
+
+### c. Multi-metric performance comparison
+
+```{r}
+# Function to extract metrics from ConfusionMatrix and Statistics
+extract_all_metrics <- function(cm, model_name, method_name) {
+  data.frame(Model = model_name, Method = method_name,
+             Accuracy = cm$overall['Accuracy'],
+             Acc_Lower = cm$overall['AccuracyLower'],
+             Acc_Upper = cm$overall['AccuracyUpper'],
+             Sensitivity = cm$byClass['Sensitivity'],
+             Specificity = cm$byClass['Specificity'],
+             Precision = cm$byClass['Precision'],
+             F1 = cm$byClass['F1'],
+             Balanced_Acc = cm$byClass['Balanced Accuracy'],
+             Kappa = cm$overall['Kappa'],
+             row.names = NULL)}
+
+# Comparison Table
+comparison_table <- rbind(
+  
+  # Simple CV
+  extract_all_metrics(cm_logit_cv, "Logistic", "Simple CV"),
+  extract_all_metrics(cm_rf_cv, "Random Forest", "Simple CV"),
+  extract_all_metrics(cm_gbm_cv, "GBM", "Simple CV"),
+  extract_all_metrics(cm_svm_cv, "SVM", "Simple CV"),
+  extract_all_metrics(cm_mlp_cv, "MLP", "Simple CV"),
+  
+  # Nested CV
+  extract_all_metrics(cm_logit_ncv, "Logistic", "Nested CV"),
+  extract_all_metrics(cm_rf_ncv, "Random Forest", "Nested CV"),
+  extract_all_metrics(cm_gbm_ncv, "GBM", "Nested CV"),
+  extract_all_metrics(cm_svm_ncv, "SVM", "Nested CV"),
+  extract_all_metrics(cm_mlp_ncv, "MLP", "Nested CV"),
+  
+  # Bayesian Optimization
+  extract_all_metrics(cm_logit_bho, "Logistic", "BHO"),
+  extract_all_metrics(cm_rf_bho, "Random Forest", "BHO"),
+  extract_all_metrics(cm_gbm_bho, "GBM", "BHO"),
+  extract_all_metrics(cm_svm_bho, "SVM", "BHO"),
+  extract_all_metrics(cm_mlp_bho, "MLP", "BHO"))
+
+comparison_table[, 3:11] <- round(comparison_table[, 3:11], 4)
+print(comparison_table)
+```
+
+Across all three evaluation methods, SVM and logistic regression consistently achieved the highest accuracies (approximately 83 - 84%), with GBM closely following, while Random Forest and MLP showed more variable performance. Random Forest achieved the highest specificity but at the cost of very low sensitivity, meaning it excelled at identifying non-fraud cases but frequently missed fraud. GBM offered the strongest sensitivity among the nonlinear models, and SVM maintained one of the best balances between fraud detection (high sensitivity) and avoiding false alarms (high specificity).
+
+Within each method, Simple CV favored SVM and logistic in overall accuracy, Nested CV highlighted GBM and SVM as top performers, and Bayesian optimization again showed SVM and logistic as the most stable. Overall, SVM and logistic regression provide the best and most consistent performance.
+
+## 4. Uncertainty & Interpretation
+
+### a. Conformal prediction intervals
+
+Conformal prediction is used to quantify uncertainty in fraud classification by constructing prediction sets that contain the true class (Fraud or NoFraud) with a guaranteed probability (e.g., 95%). Instead of forcing a single decision, the method allows the model to return both labels when uncertain, providing reliable risk-aware predictions for borderline transactions.
+
+```{r}
+# Train - calibration - test split (70-15-15)
+set.seed(747)
+cal_idx <- createDataPartition(y_train, p = 0.2, list = FALSE)
+
+X_tr  <- x_train[ -cal_idx, ]
+y_tr  <- y_train[ -cal_idx ]
+
+X_cal <- x_train[ cal_idx, ]
+y_cal <- y_train[ cal_idx ]
+
+X_te  <- x_test
+y_te  <- y_test
+
+
+# ICP functions
+nonconformity <- function(true_label, prob_Fraud) {
+  ifelse(true_label == "Fraud", 1 - prob_Fraud, prob_Fraud)}
+
+get_cal_scores <- function(model, predFun, X_cal, y_cal) {
+  p <- predFun(model, X_cal)
+  nonconformity(y_cal, p)}
+
+icp_predict <- function(model, predFun, cal_scores, x_new) {
+  p_new <- predFun(model, x_new)
+  a_fraud    <- 1 - p_new
+  a_nofraud  <- p_new
+
+  pval_fraud   <- (sum(cal_scores >= a_fraud)   + 1) / (length(cal_scores) + 1)
+  pval_nofraud <- (sum(cal_scores >= a_nofraud) + 1) / (length(cal_scores) + 1)
+
+  return(c(Fraud = pval_fraud, NoFraud = pval_nofraud))}
+
+# Probability wrappers for all models
+logit_fit <- glm(Fraud ~ ., data = data.frame(Fraud=y_tr, X_tr), family="binomial")
+logit_prob <- function(model, newx) predict(model, newdata=newx, type="response")
+
+rf_fit <- randomForest(X_tr, y_tr, ntree=400)
+rf_prob <- function(model, newx) {predict(model, newdata=newx, type="prob")[,"Fraud"]}
+
+y_tr_num <- ifelse(y_tr=="Fraud", 1, 0)
+gbm_fit <- gbm(y_tr_num ~ ., data = data.frame(y_tr_num, X_tr),
+               distribution="bernoulli", n.trees=400, shrinkage=0.05)
+gbm_prob <- function(model, newx) {predict(model, newdata=newx, 
+                                           n.trees=400, type="response")}
+
+svm_fit <- svm(X_tr, y_tr, probability = TRUE)
+svm_prob <- function(model, newx) {
+  p <- attr(predict(model, newx, probability=TRUE), "probabilities")
+  p[,"Fraud"]}
+
+y_tr_num <- ifelse(y_tr=="Fraud", 1, 0)
+mlp_fit <- nnet(X_tr, y_tr_num, size=5, decay=0.01, maxit=200, linout=FALSE)
+mlp_prob <- function(model, newx) as.vector(predict(model, newx))
+
+# Compute Cal scores
+cal_logit <- get_cal_scores(logit_fit, logit_prob, X_cal, y_cal)
+cal_rf <- get_cal_scores(rf_fit,   rf_prob,  X_cal, y_cal)
+cal_gbm  <- get_cal_scores(gbm_fit,  gbm_prob, X_cal, y_cal)
+cal_svm  <- get_cal_scores(svm_fit,  svm_prob, X_cal, y_cal)
+cal_mlp  <- get_cal_scores(mlp_fit,  mlp_prob, X_cal, y_cal)
+
+# Conformal predictions on test set
+epsilon <- 0.05 # 95% CI
+cp_logit <- t(apply(X_te, 1, function(x) icp_predict(logit_fit, logit_prob, cal_logit, as.data.frame(t(x)))))
+cp_rf <- t(apply(X_te, 1, function(x) icp_predict(rf_fit, rf_prob, cal_rf, as.data.frame(t(x)))))
+cp_gbm <- t(apply(X_te, 1, function(x) icp_predict(gbm_fit, gbm_prob, cal_gbm, as.data.frame(t(x)))))
+cp_svm <- t(apply(X_te, 1, function(x) icp_predict(svm_fit, svm_prob, cal_svm, as.data.frame(t(x)))))
+cp_mlp <- t(apply(X_te, 1, function(x) icp_predict(mlp_fit, mlp_prob, cal_mlp, as.data.frame(t(x)))))
+
+prediction_set <- function(pvals, eps) {
+  apply(pvals, 1, function(z) names(z)[z > eps])}
+
+pred_set_logit <- prediction_set(cp_logit, epsilon)
+pred_set_rf <- prediction_set(cp_rf, epsilon)
+pred_set_gbm <- prediction_set(cp_gbm, epsilon)
+pred_set_svm <- prediction_set(cp_svm, epsilon)
+pred_set_mlp <- prediction_set(cp_mlp, epsilon)
+```
+
+```{r}
+# Coverage and Set Size
+coverage <- function(pred_sets, true_labels) {
+  mean(mapply(function(S, y) y %in% S, pred_sets, true_labels))}
+set_size <- function(pred_sets) {mean(sapply(pred_sets, length))}
+
+cov_logit <- coverage(pred_set_logit, y_te)
+cov_rf <- coverage(pred_set_rf, y_te)
+cov_gbm <- coverage(pred_set_gbm, y_te)
+cov_svm <- coverage(pred_set_svm, y_te)
+cov_mlp <- coverage(pred_set_mlp, y_te)
+
+ss_logit <- set_size(pred_set_logit)
+ss_rf <- set_size(pred_set_rf)
+ss_gbm <- set_size(pred_set_gbm)
+ss_svm <- set_size(pred_set_svm)
+ss_mlp <- set_size(pred_set_mlp)
+
+conformal_summary <- data.frame(
+  Model     = c("Logistic", "Random Forest", "GBM", "SVM", "MLP"),
+  Coverage  = c(cov_logit, cov_rf, cov_gbm, cov_svm, cov_mlp),
+  Set_Size  = c(ss_logit, ss_rf, ss_gbm, ss_svm, ss_mlp))
+
+conformal_summary
+```
+
+At $\epsilon$ = 0.05, all models achieved empirical coverage close to the nominal 95% level, confirming valid uncertainty quantification. Logistic regression achieved high coverage (0.942) but with very large prediction set size (1.94), indicating frequent uncertainty. Random Forest produced the smallest average set size (1.16) with slightly lower coverage (0.919), while SVM and MLP offered the best balance between valid coverage (approximately 0.93) and compact, informative prediction sets (ranging around 1.20 - 1.29).
+
+### b. SHAP, LIME, partial dependence
+
+### c. Bootstrap uncertainty estimation
+
+```{r}
+library(caret)
+
+bootstrap_eval <- function(model, x_test, y_test, n_boot = 500) {
+  acc <- sens <- spec <- numeric(n_boot)
+
+  for (b in 1:n_boot) {
+    idx <- sample(seq_len(nrow(x_test)), replace = TRUE)
+    xb <- x_test[idx, ]
+    yb <- y_test[idx]
+
+    pred <- predict(model, newdata = xb)
+
+    cm <- confusionMatrix(pred, yb, positive = "Fraud")
+
+    acc[b]  <- cm$overall["Accuracy"]
+    sens[b] <- cm$byClass["Sensitivity"]
+    spec[b] <- cm$byClass["Specificity"]
+  }
+
+  list(
+    Accuracy_CI   = quantile(acc,  c(.025, .975)),
+    Sensitivity_CI= quantile(sens, c(.025, .975)),
+    Specificity_CI= quantile(spec, c(.025, .975)),
+    dist = list(acc = acc, sens = sens, spec = spec)
+  )
+}
+```
+
+**i. Regularized Logistic Regression**
+
+```{r}
+boot_logit <- bootstrap_eval(fit_logit, x_test, y_test)
+boot_logit[c(1:3)]
+```
+
+Test accuracy is stable for the logistic regression model, with a 95% confidence interval of [0.820, 0.852]. Sensitivity ranges from [0.738, 0.815] while specificity remains higher and tighter at [0.834, 0.869], indicating more reliable performance in identifying non-fraud than fraud cases.
+
+**ii. Random Forest**
+
+```{r}
+boot_rf <- bootstrap_eval(fit_rf, x_test, y_test)
+boot_rf[c(1:3)]
+```
+
+Random Forest model achieves high and stable accuracy with a 95% CI of [0.832, 0.863]. However, sensitivity remains low and unstable [0.545, 0.641], while specificity is very high and tightly bounded [0.898, 0.925], confirming that the model is much better at identifying non-fraud than fraud cases.
+
+**iii. Gradient Boosting**
+
+```{r message=FALSE}
+bootstrap_eval_gbm <- function(model, x_test, y_test, n_boot = 500) {
+  acc <- sens <- spec <- numeric(n_boot)
+
+  for (b in 1:n_boot) {
+    idx <- sample(seq_len(nrow(x_test)), replace = TRUE)
+    xb <- x_test[idx, ]
+    yb <- y_test[idx]
+
+    pred <- predict(model, xb)
+
+    cm <- confusionMatrix(pred, yb, positive = "Fraud")
+
+    acc[b]  <- cm$overall["Accuracy"]
+    sens[b] <- cm$byClass["Sensitivity"]
+    spec[b] <- cm$byClass["Specificity"]
+  }
+
+  list(
+    Accuracy_CI   = quantile(acc,  c(.025, .975)),
+    Sensitivity_CI= quantile(sens, c(.025, .975)),
+    Specificity_CI= quantile(spec, c(.025, .975)),
+    dist = list(acc = acc, sens = sens, spec = spec)
+  )
+}
+
+# Run GBM bootstrap
+boot_gbm <- bootstrap_eval_gbm(fit_gbm, data.frame(x_test),
+                                factor(y_test))
+boot_gbm[c(1:3)]
+```
+
+The GBM model attains stable accuracy with a 95% confidence interval of [0.825, 0.858]. Sensitivity ranges from [0.617, 0.710], while specificity remains consistently higher at [0.873, 0.904], indicating balanced but slightly stronger performance in identifying non-fraud transactions.
+
+**iv. Support Vector Classification**
+
+```{r}
+boot_svm <- bootstrap_eval(fit_svm, x_test, y_test)
+boot_svm[c(1:3)]
+```
+
+The SVM also achieves stable accuracy with a 95% confidence interval of [0.819, 0.851]. Sensitivity is consistently strong at [0.731, 0.811], while specificity remains stable at [0.833, 0.868], indicating balanced and reliable performance across both fraud and non-fraud detection.
+
+**v. Neural Network Approaches (MLP)**
+
+```{r}
+boot_mlp <- bootstrap_eval(fit_mlp, x_test, y_test)
+boot_mlp[c(1:3)]
+```
+
+Bootstrap results indicate that the MLP model has lower and less stable accuracy with a 95% CI of [0.776, 0.812]. Sensitivity is relatively weak [0.526, 0.630], while specificity is stable at [0.830, 0.865], suggesting limited effectiveness for detecting fraud despite reasonable non-fraud classification.
+
+**vi. Comparison Plots**
+
+```{r}
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Combine Accuracy
+acc_df <- bind_rows(
+  data.frame(Model = "Logistic", Accuracy = boot_logit$dist$acc),
+  data.frame(Model = "Random Forest", Accuracy = boot_rf$dist$acc),
+  data.frame(Model = "GBM", Accuracy = boot_gbm$dist$acc),
+  data.frame(Model = "SVM (Linear)", Accuracy = boot_svm$dist$acc),
+  data.frame(Model = "MLP", Accuracy = boot_mlp$dist$acc))
+
+# Combine Sensitivity
+sens_df <- bind_rows(
+  data.frame(Model = "Logistic", Sensitivity = boot_logit$dist$sens),
+  data.frame(Model = "Random Forest", Sensitivity = boot_rf$dist$sens),
+  data.frame(Model = "GBM", Sensitivity = boot_gbm$dist$sens),
+  data.frame(Model = "SVM (Linear)", Sensitivity = boot_svm$dist$sens),
+  data.frame(Model = "MLP", Sensitivity = boot_mlp$dist$sens))
+
+# Combine Specificity
+spec_df <- bind_rows(
+  data.frame(Model = "Logistic", Specificity = boot_logit$dist$spec),
+  data.frame(Model = "Random Forest", Specificity = boot_rf$dist$spec),
+  data.frame(Model = "GBM", Specificity = boot_gbm$dist$spec),
+  data.frame(Model = "SVM (Linear)", Specificity = boot_svm$dist$spec),
+  data.frame(Model = "MLP", Specificity = boot_mlp$dist$spec))
+```
+
+```{r}
+# Accuracy
+ggplot(acc_df, aes(x = Accuracy, fill = Model)) +
+  geom_density(alpha = 0.4) +
+  theme_bw() +
+  ggtitle("Bootstrap Accuracy Distribution") +
+  xlab("Accuracy") +
+  ylab("Density")
+```
+
+```{r}
+# Sensitivity
+ggplot(sens_df, aes(x = Sensitivity, fill = Model)) +
+  geom_density(alpha = 0.4) +
+  theme_bw() +
+  ggtitle("Bootstrap Sensitivity Distribution") +
+  xlab("Sensitivity") +
+  ylab("Density")
+```
+
+```{r}
+# Specificity
+ggplot(spec_df, aes(x = Specificity, fill = Model)) +
+  geom_density(alpha = 0.4) +
+  theme_bw() +
+  ggtitle("Bootstrap Specificity Distribution") +
+  xlab("Specificity") +
+  ylab("Density")
+```
+
+The bootstrap distributions show clear performance trade-offs across models and validate the results from the nested cross validation and bayesian hyperparameter optimization. Random Forest has the highest accuracy and specificity, indicating strong performance in correctly identifying non-fraud cases, but its sensitivity is consistently lower, confirming it struggles to detect fraud. Logistic regression and SVM exhibit the best balance, with stable sensitivity and competitive accuracy, making them more reliable for fraud detection. GBM performs moderately well across all three metrics, while MLP achieves the lowest accuracy and sensitivity, indicating weaker overall discrimination despite reasonable specificity.
